@@ -369,12 +369,22 @@ function statRow(items) {
     '<div class="stat"><div class="v">' + i.v + '</div><div class="k">' + esc(i.k) + '</div></div>').join('') + '</div>';
 }
 
+/* Een groet die past bij het moment van de dag. */
+function groet() {
+  const u = new Date().getHours();
+  const naam = state.profile.naam ? ' ' + state.profile.naam : '';
+  if (u < 6) return 'Nog wakker' + naam + '?';
+  if (u < 12) return 'Goedemorgen' + naam;
+  if (u < 18) return 'Middag' + naam;
+  return 'Avond' + naam;
+}
+
 function screenHome() {
   const plan = weekPlan();
   const st = weekStats();
   const gew = laatsteGewicht();
 
-  let h = topbar('Hoi' + (state.profile.naam ? ' ' + state.profile.naam : ''), formatLong(todayKey()));
+  let h = topbar(groet(), formatLong(todayKey()));
   h += '<div class="phaseline">' + phaseLine() + '</div>';
   h += heroCard();
 
@@ -394,7 +404,7 @@ function screenHome() {
     { v: gew ? fmtKg(gew.kg) : '&mdash;', k: 'jouw gewicht' }
   ]);
 
-  h += '<div class="section"><h2>Los erbij</h2></div>';
+  h += '<div class="section"><h2>Verder</h2></div>';
   h += '<div class="card tight"><ul class="rows">' +
     '<li data-tab-mob="1"><span class="idx">' + ICON.stretch + '</span><span class="main"><span class="name">Mobiliteit</span>' +
     '<br><span class="meta">twee routines van een paar minuten</span></span><span class="right">open</span></li>' +
@@ -494,8 +504,8 @@ function screenKalender() {
     '<div class="caldow">' + ['ma','di','wo','do','vr','za','zo'].map(x => '<span>' + x + '</span>').join('') + '</div>' +
     '<div class="calgrid">' + cells + '</div>' +
     '<div class="legend"><span><i style="background:var(--accent)"></i>gym</span>' +
-    '<span><i style="background:#4aa8ff"></i>duurtraining</span>' +
-    '<span><i style="background:#c07cff"></i>hockey</span>' +
+    '<span><i style="background:var(--blauw)"></i>duurtraining</span>' +
+    '<span><i style="background:var(--lila)"></i>hockey</span>' +
     '<span><i style="background:var(--accent)"></i>gevuld is afgerond</span></div></div>';
   h += dayDetail(view.sel || todayKey());
   h += '<input type="hidden" value="' + monthKey + '">';
@@ -1090,7 +1100,7 @@ function screenVoortgang() {
 
 function deelOefeningen() {
   const namen = allTrackedExercises();
-  if (!namen.length) return leeg('Nog geen oefeningen gelogd. Na je eerste training zie je hier je lijnen omhoog gaan.');
+  if (!namen.length) return leeg('Hier komen je lijnen te staan, zodra je een training hebt afgerond.');
 
   const gekozen = namen.indexOf(view.ex) !== -1 ? view.ex : namen[0];
   const hist = historyFor(gekozen);
@@ -1122,7 +1132,7 @@ function deelRecords() {
     return { name: n, kg: kg, date: wanneer ? wanneer.date : '' };
   }).filter(r => r.kg > 0).sort((a, b) => b.kg - a.kg);
 
-  if (!recs.length) return leeg('Zodra je gewichten invult staan je beste sets hier.');
+  if (!recs.length) return leeg('Je zwaarste sets komen hier vanzelf te staan.');
   return '<div class="card tight"><ul class="rows">' + recs.map(r =>
     '<li><span class="main"><span class="name">' + esc(r.name) + '</span><br><span class="meta">' + esc(formatDate(r.date)) + '</span></span>' +
     '<span class="right"><strong>' + fmtKg(r.kg) + ' kg</strong></span></li>').join('') + '</ul></div>';
@@ -1130,7 +1140,7 @@ function deelRecords() {
 
 function deelLog() {
   const lijst = state.sessions.slice().sort((a, b) => b.ts - a.ts);
-  if (!lijst.length) return leeg('Nog niks afgerond.');
+  if (!lijst.length) return leeg('Nog geen trainingen afgerond.');
   let h = '<div class="card tight"><ul class="rows">' + lijst.slice(0, 40).map(s =>
     '<li data-open-session="' + s.id + '"><span class="idx done">' + (s.type === 'gym' ? 'G' : 'D') + '</span>' +
     '<span class="main"><span class="name">' + esc(s.title) + '</span><br><span class="meta">' + esc(sessionSummaryLine(s)) +
@@ -1165,16 +1175,16 @@ function drawCharts() {
     const py = v => pad.t + (1 - (v - lo) / (hi - lo)) * (h - pad.t - pad.b);
 
     /* twee rustige hulplijnen */
-    g.strokeStyle = '#1c1e22'; g.lineWidth = 1;
+    g.strokeStyle = '#241E1A'; g.lineWidth = 1;
     [pad.t, h - pad.b].forEach(y => { g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); });
-    g.fillStyle = '#5f646c'; g.font = '11px -apple-system,sans-serif'; g.textAlign = 'right';
+    g.fillStyle = '#796E62'; g.font = '11px ui-rounded,-apple-system,sans-serif'; g.textAlign = 'right';
     g.fillText(Math.round(max), pad.l - 8, py(max) + 4);
     if (min !== max) g.fillText(Math.round(min), pad.l - 8, py(min) + 4);
 
     /* vlak onder de lijn */
     const vlak = g.createLinearGradient(0, pad.t, 0, h - pad.b);
-    vlak.addColorStop(0, 'rgba(55,224,127,.22)');
-    vlak.addColorStop(1, 'rgba(55,224,127,0)');
+    vlak.addColorStop(0, 'rgba(255,138,76,.24)');
+    vlak.addColorStop(1, 'rgba(255,138,76,0)');
     g.beginPath();
     d.points.forEach((p, i) => { const x = px(i), y = py(p.y); i ? g.lineTo(x, y) : g.moveTo(x, y); });
     g.lineTo(px(d.points.length - 1), h - pad.b);
@@ -1182,17 +1192,17 @@ function drawCharts() {
     g.closePath();
     g.fillStyle = vlak; g.fill();
 
-    g.strokeStyle = '#37e07f'; g.lineWidth = 2.5; g.lineJoin = 'round'; g.lineCap = 'round';
+    g.strokeStyle = '#FF8A4C'; g.lineWidth = 3; g.lineJoin = 'round'; g.lineCap = 'round';
     g.beginPath();
     d.points.forEach((p, i) => { const x = px(i), y = py(p.y); i ? g.lineTo(x, y) : g.moveTo(x, y); });
     g.stroke();
 
     /* alleen het laatste punt markeren, dat houdt het rustig */
     const laatste = d.points.length - 1;
-    g.fillStyle = '#37e07f';
-    g.beginPath(); g.arc(px(laatste), py(d.points[laatste].y), 4, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#FF8A4C';
+    g.beginPath(); g.arc(px(laatste), py(d.points[laatste].y), 4.5, 0, Math.PI * 2); g.fill();
 
-    g.fillStyle = '#5f646c'; g.textAlign = 'left';
+    g.fillStyle = '#796E62'; g.textAlign = 'left';
     g.fillText(d.points[0].label, pad.l, h - 4);
     if (d.points.length > 1) { g.textAlign = 'right'; g.fillText(d.points[laatste].label, w - pad.r, h - 4); }
   });
