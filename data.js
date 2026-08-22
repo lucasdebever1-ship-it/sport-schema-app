@@ -129,11 +129,11 @@ const MOBILITY = [
   }
 ];
 
-const MOBILITY_WHY = 'Bij hockey sta je veel voorovergebogen, en daar trekken je heupen en bovenrug van dicht.';
+const MOBILITY_WHY = 'Van al dat voorovergebogen staan bij hockey trekken je heupen en bovenrug dicht.';
 
 const TRIATHLON_INTRO =
-  'Je lichaam kan niet tegelijk maximaal spiermassa en uithoudingsvermogen opbouwen. ' +
-  'In deze fase is de gym gericht op behoud van je kracht en gaat de aandacht naar zwemmen, fietsen en hardlopen.';
+  'Spiermassa en uithoudingsvermogen tegelijk opbouwen gaat niet. Vanaf nu houdt de gym je kracht op peil ' +
+  'en gaat de rest van je energie naar zwemmen, fietsen en hardlopen.';
 
 const DAY_NAMES = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
 const DAY_SHORT = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
