@@ -23,7 +23,8 @@ function defaultState() {
     routines: DEFAULT_ROUTINES.map(r => Object.assign({}, r)),
     events: [],       // losse afspraken
     goals: DEFAULT_GOALS.map(g => Object.assign({ log: [] }, g)),
-    checkins: [],     // wat je op vragen antwoordde
+    offdays: {},      // dagen waarop iets vervalt
+    notes: {},        // losse dingen die je doorgeeft
     profile: { naam: '', geboortejaar: '', lengte: '' },
     weights: [],      // [{ date, kg }]
     flags: {},
@@ -272,7 +273,9 @@ function duurTekst(min) {
 }
 
 function routinesOn(d) {
-  return state.routines.filter(r => r.days.indexOf(d.getDay()) !== -1);
+  const uit = (state.offdays && state.offdays[dateKey(d)]) || [];
+  if (uit.indexOf('alles') !== -1) return [];
+  return state.routines.filter(r => r.days.indexOf(d.getDay()) !== -1 && uit.indexOf(r.id) === -1);
 }
 function eventsOn(d) {
   const k = dateKey(d);
@@ -365,6 +368,8 @@ function goalScore(g) {
     if (dagen < 0) score += 6;
     else if (dagen <= 30) score += (30 - dagen) / 4;
   }
+  if (g.prio === 'hoog') score += 3;
+  if (g.prio === 'laag') score -= 2;
   if (goalLog(g).some(x => x.date === todayKey())) score -= 5;
   return score;
 }
@@ -385,6 +390,7 @@ function goalReason(g) {
 function candidates(d) {
   const lijst = [];
   const k = dateKey(d);
+  if (state.flags.rustdagen && state.flags.rustdagen[k]) return lijst;
 
   const w = workoutForDate(d);
   if (w && !sessionOn(k)) {
@@ -457,7 +463,7 @@ function planDay(d) {
 /* Blokken en plan door elkaar, zoals je dag er echt uitziet. */
 function dagLijn(d) {
   const rijen = blocksOn(d).map(b => ({
-    van: b.van, tot: b.tot, titel: b.titel, kind: b.kind, vast: true, id: b.id, note: b.note
+    van: b.van, tot: b.tot, titel: b.titel, kind: b.kind, vast: true, id: b.id, evId: b.evId, note: b.note
   }));
   planDay(d).forEach(p => rijen.push({
     van: p.van, tot: p.tot, titel: p.titel, kind: p.soort, vast: false,
@@ -530,24 +536,179 @@ function nudges() {
   return uit.slice(0, 4);
 }
 
-/* ================= vragen die de app stelt ================= */
+/* ================= wat je intypt ================= */
 
-function huidigeVraag() {
-  if (state.flags.vraagDatum === todayKey()) return null;
-  const kandidaat = state.goals.filter(g => g.actief).sort((a, b) => goalScore(b) - goalScore(a))[0];
-  if (!kandidaat) return null;
-  const gesteld = (state.checkins || []).filter(c => c.goal === kandidaat.id).map(c => c.vraag);
-  const vraag = VRAGEN.filter(v => !v.bijKind || v.bijKind === kandidaat.kind)
-    .find(v => gesteld.indexOf(v.id) === -1);
-  if (!vraag) return null;
-  return { goal: kandidaat, vraag: vraag, tekst: vraag.tekst.replace('{doel}', kandidaat.title) };
+/* Je typt een zin, de app probeert er iets mee te doen. */
+function verwerkZin(tekst) {
+  const t = tekst.toLowerCase().trim();
+  if (!t) return null;
+
+  const datum = vindDatum(t);
+  const tijden = vindTijden(t);
+
+  /* dagen die vervallen */
+  if (/(\bgeen\b|\bvrij\b|\buitval\b|\bafgelast\b|\bvervalt\b|niet naar)/.test(t)) {
+    const welke = /school|les/.test(t) ? 'school' : /hockey|training|wedstrijd/.test(t) ? 'sport' : /werk/.test(t) ? 'werk' : null;
+    const dag = datum || todayKey();
+    state.offdays = state.offdays || {};
+    const raken = welke ? state.routines.filter(r => r.kind === welke).map(r => r.id) : ['alles'];
+    state.offdays[dag] = (state.offdays[dag] || []).concat(raken);
+    save();
+    return { tekst: (welke ? welke : 'alles') + ' staat uit op ' + formatDate(dag) + ', ik plan die tijd opnieuw in.', herstel: { soort: 'offday', dag: dag } };
+  }
+
+  /* ziek of kapot */
+  if (/(\bziek\b|\bkapot\b|geblesseerd|\bgriep\b)/.test(t)) {
+    const dag = datum || todayKey();
+    state.offdays = state.offdays || {};
+    state.offdays[dag] = ['alles'];
+    state.flags.rustdagen = state.flags.rustdagen || {};
+    state.flags.rustdagen[dag] = true;
+    save();
+    return { tekst: 'Rustdag op ' + formatDate(dag) + '. Ik stel niks zwaars voor.', herstel: { soort: 'offday', dag: dag } };
+  }
+
+  /* nieuw doel */
+  if (/(nieuw doel|ik wil|ga ik|wil ik gaan|doel:)/.test(t)) {
+    const naam = tekst.replace(/^(nieuw doel[:,]?|ik wil( gaan)?|ik ga|doel:)\s*/i, '').trim();
+    if (naam.length > 1) {
+      const g = {
+        id: 'g' + Date.now(), title: naam.charAt(0).toUpperCase() + naam.slice(1),
+        kind: /leren|koken|taal|gitaar/.test(t) ? 'leren' : 'maken',
+        perWeek: 2, minutes: 30, deadline: '', prio: 'normaal', actief: true, log: []
+      };
+      state.goals.push(g);
+      save();
+      return { tekst: g.title + ' staat erbij. Hoe belangrijk is het?', vraagPrio: g.id };
+    }
+  }
+
+  /* iets met een tijd erin is een afspraak */
+  if (tijden) {
+    const dag = datum || todayKey();
+    const soort = /werk/.test(t) ? 'werk' : /feest|verjaardag|borrel|vrienden|film|stappen/.test(t) ? 'sociaal'
+      : /tandarts|ortho|dokter|kapper|huisarts/.test(t) ? 'afspraak'
+      : /toets|so|proefwerk|repetitie|deadline/.test(t) ? 'school' : 'afspraak';
+    const e = {
+      id: 'e' + Date.now(), title: netteTitel(tekst), kind: soort,
+      date: dag, start: tijden.van, end: tijden.tot, note: ''
+    };
+    state.events.push(e);
+    save();
+    return { tekst: e.title + ' staat in je agenda op ' + formatDate(dag) + ', ' + e.start + ' tot ' + e.end + '.', herstel: { soort: 'event', id: e.id }, botsing: e };
+  }
+
+  /* de rest bewaren we als notitie bij de dag */
+  const dag = datum || todayKey();
+  state.notes = state.notes || {};
+  state.notes[dag] = (state.notes[dag] || []).concat([tekst.trim()]);
+  save();
+  return { tekst: 'Genoteerd bij ' + formatDate(dag) + '. Zet er een tijd bij als het ook in je dag moet staan.' };
 }
 
-function beantwoordVraag(goalId, vraagId, antwoord) {
-  state.checkins = state.checkins || [];
-  state.checkins.push({ date: todayKey(), goal: goalId, vraag: vraagId, antwoord: antwoord });
-  state.flags.vraagDatum = todayKey();
-  save();
+function netteTitel(tekst) {
+  let s = tekst.replace(/^\s*(ik\s+(heb|ga|moet|werk)?)\s*/i, m => /werk/i.test(m) ? 'werk ' : '').replace(/\b(van|tot|om|op)\s*\d{1,2}([:.]\d{2})?\b/gi, ' ')
+    .replace(/\b(vandaag|morgen|overmorgen|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/gi, ' ')
+    .replace(/\s+/g, ' ').replace(/^[ ,.-]+|[ ,.-]+$/g, '').trim();
+  if (!s) s = 'Afspraak';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function vindDatum(t) {
+  if (/overmorgen/.test(t)) return dateKey(addDays(today(), 2));
+  if (/morgen/.test(t)) return dateKey(addDays(today(), 1));
+  if (/vandaag|vanavond|vanmiddag|straks|nu/.test(t)) return todayKey();
+
+  for (const naam in WOORDEN.dagen) {
+    if (new RegExp('\\b' + naam + '\\b').test(t)) {
+      const doelDag = WOORDEN.dagen[naam];
+      for (let i = 1; i <= 7; i++) {
+        const d = addDays(today(), i);
+        if (d.getDay() === doelDag) return dateKey(d);
+      }
+    }
+  }
+  const m = t.match(/\b(\d{1,2})[-\/](\d{1,2})\b/);
+  if (m) {
+    const d = new Date(today().getFullYear(), Number(m[2]) - 1, Number(m[1]));
+    if (daysBetween(today(), d) < -1) d.setFullYear(d.getFullYear() + 1);
+    return dateKey(d);
+  }
+  return null;
+}
+
+function vindTijden(t) {
+  const reeks = t.match(/(\d{1,2})([:.](\d{2}))?\s*(?:tot|-|\/)\s*(\d{1,2})([:.](\d{2}))?/);
+  if (reeks) {
+    const van = uur(reeks[1], reeks[3]);
+    let tot = uur(reeks[4], reeks[6]);
+    if (toMin(tot) <= toMin(van)) tot = '23:59';   /* loopt door tot na middernacht */
+    return { van: van, tot: tot };
+  }
+  const los = t.match(/(?:om|vanaf)\s*(\d{1,2})([:.](\d{2}))?/);
+  if (los) {
+    const van = uur(los[1], los[3]);
+    return { van: van, tot: toTijd(Math.min(toMin(van) + 60, 23 * 60 + 59)) };
+  }
+  return null;
+}
+
+function uur(u, m) {
+  return String(Math.min(23, Number(u))).padStart(2, '0') + ':' + String(m ? Number(m) : 0).padStart(2, '0');
+}
+
+/* ================= ik heb nu tijd ================= */
+
+function nuTijd(minuten) {
+  const nu = new Date().getHours() * 60 + new Date().getMinutes();
+  const opties = candidates(today())
+    .filter(c => c.minuten <= minuten)
+    .slice(0, 4);
+
+  if (!opties.length) {
+    return showModal('<h2>Even niks</h2><p class="dim">Voor ' + minuten + ' minuten heb ik niks staan. Prima moment om niks te doen.</p>' +
+      '<button class="btn accent" data-close="1">Ook goed</button>');
+  }
+
+  let h = '<h2>' + minuten + ' minuten</h2><p class="dim small">Op volgorde van wat het hardst roept.</p><ul class="rows">';
+  opties.forEach((c, i) => {
+    h += '<li><span class="vak ' + c.soort + '">' + (i + 1) + '</span>' +
+      '<span class="main"><span class="name">' + esc(c.titel) + '</span><br><span class="meta">' + esc(c.reden) + '</span></span>' +
+      '<span class="right">' + c.minuten + ' min</span></li>';
+  });
+  h += '</ul>';
+  const beste = opties[0];
+  if (beste.soort === 'gym') h += '<button class="btn accent" data-start="' + beste.id + '">' + beste.titel + ' beginnen</button>';
+  else if (beste.soort === 'mobiliteit') h += '<button class="btn accent" data-mob="' + beste.id + '">' + beste.titel + ' starten</button>';
+  else h += '<button class="btn accent" data-logdoel="' + beste.id + '|' + beste.minuten + '">' + beste.titel + ', ik doe het</button>';
+  h += '<button class="btn ghost slim" data-close="1">Later</button>';
+  showModal(h);
+}
+
+function zegIets() {
+  const veld = el('zeg');
+  const tekst = veld ? veld.value.trim() : '';
+  if (!tekst) return;
+  const uit = verwerkZin(tekst);
+  if (veld) veld.value = '';
+  render();
+  if (!uit) return;
+  if (uit.vraagPrio) {
+    return showModal('<h2>' + esc(uit.tekst) + '</h2>' +
+      PRIO.map(p => '<button class="btn' + (p.id === 'hoog' ? ' accent' : '') + '" data-zetprio="' + uit.vraagPrio + '|' + p.id + '">' + esc(p.label) + '</button>').join(''));
+  }
+  if (uit.botsing) {
+    toast(uit.tekst);
+    return vertelOverBotsing(uit.botsing);
+  }
+  toast(uit.tekst);
+}
+
+function vraagTijd() {
+  showModal('<h2>Hoeveel tijd heb je?</h2>' +
+    '<div class="tijdkeuze">' + [20, 30, 45, 60, 90].map(m =>
+      '<button data-nutijd="' + m + '">' + m + '<span>min</span></button>').join('') + '</div>' +
+    '<button class="btn ghost slim" data-close="1">Laat maar</button>');
 }
 
 /* ================= kleine stukjes die overal terugkomen ================= */
@@ -625,56 +786,79 @@ function phaseLine() {
   return '<span class="pill grey">Krachtfase</span><span class="small dim">gym staat op schema</span>';
 }
 
-/* ================= vandaag ================= */
+/* ================= kleuren ================= */
 
-const KIND_KLEUR = {
-  school: 'blauw', sport: 'lila', werk: 'klei', afspraak: 'blauw', sociaal: 'lila',
-  gym: 'accent', doel: 'accent', mobiliteit: 'accent', anders: 'grijs', maken: 'accent', leren: 'accent'
-};
+/* ma, di of ma-vr, net wat past. */
+function dagenLabel(days) {
+  const sorted = days.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  const namen = sorted.map(d => DAY_SHORT[d]);
+  if (sorted.length >= 3) {
+    const nrs = sorted.map(d => (d + 6) % 7);
+    const opeenvolgend = nrs.every((n, i) => i === 0 || n === nrs[i - 1] + 1);
+    if (opeenvolgend) return namen[0] + '-' + namen[namen.length - 1];
+  }
+  return namen.join(' ');
+}
 
-function tijdRij(r) {
-  const kleur = KIND_KLEUR[r.kind] || 'grijs';
+function kleurVoor(kind) {
+  return (KLEUREN[kind] || KLEUREN.anders).hex;
+}
+function zacht(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+}
+
+/* Een blok in je dag, met de tekst in de kleur van het soort. */
+function blokRij(r, compact) {
+  const hex = kleurVoor(r.kind);
+  const stijl = 'background:' + zacht(hex, r.vast ? 0.14 : 0.2) + ';border-left:3px solid ' + hex;
   let knoppen = '';
-  if (!r.vast) {
-    if (r.kind === 'gym') knoppen = '<button class="mini-btn" data-start="' + r.id + '">start</button>';
-    else if (r.kind === 'mobiliteit') knoppen = '<button class="mini-btn" data-mob="' + r.id + '">start</button>';
-    else knoppen = '<button class="mini-btn" data-logdoel="' + r.id + '|' + r.minuten + '">klaar</button>';
+  if (!r.vast && !compact) {
+    if (r.kind === 'gym') knoppen = '<button class="mini-btn" data-start="' + r.id + '">beginnen</button>';
+    else if (r.kind === 'mobiliteit') knoppen = '<button class="mini-btn" data-mob="' + r.id + '">starten</button>';
+    else knoppen = '<button class="mini-btn" data-logdoel="' + r.id + '|' + r.minuten + '">gedaan</button>';
     knoppen += '<button class="mini-btn stil" data-skipdoel="' + r.id + '">niet nu</button>';
   }
-  return '<li class="rij ' + (r.vast ? 'vast' : 'los') + '">' +
-    '<span class="tijd">' + toTijd(r.van) + '<br><span class="dim tiny">' + toTijd(r.tot) + '</span></span>' +
-    '<span class="streep ' + kleur + '"></span>' +
-    '<span class="main"><span class="name">' + esc(r.titel) + '</span>' +
-    (r.reden ? '<br><span class="meta">' + esc(r.reden) + '</span>' : '') +
-    (r.note ? '<br><span class="meta">' + esc(r.note) + '</span>' : '') +
+  return '<li class="dagrij">' +
+    '<span class="uur">' + toTijd(r.van) + '<br><span class="dim tiny">' + toTijd(r.tot) + '</span></span>' +
+    '<span class="blok' + (r.vast ? '' : ' voorstel') + '" style="' + stijl + '"' + (r.evId ? ' data-afspraak="' + r.evId + '"' : '') + '>' +
+    '<span class="btitel" style="color:' + hex + '">' + esc(r.titel) + '</span>' +
+    (r.reden ? '<span class="bmeta">' + esc(r.reden) + '</span>' : '') +
+    (r.note ? '<span class="bmeta">' + esc(r.note) + '</span>' : '') +
     (knoppen ? '<span class="knoppen">' + knoppen + '</span>' : '') +
     '</span></li>';
 }
 
+function dagBlokkenHtml(d, compact) {
+  const rijen = dagLijn(d);
+  if (!rijen.length) return leeg('Lege dag.');
+  return '<ul class="dagijst">' + rijen.map(r => blokRij(r, compact)).join('') + '</ul>';
+}
+
+/* ================= vandaag ================= */
+
 function screenVandaag() {
   const d = today();
-  const rijen = dagLijn(d);
   let h = topbar(groet(), formatLong(todayKey()));
+
+  h += '<div class="snelrij">' +
+    '<button class="snel" data-vraagtijd="1"><b>Ik heb nu tijd</b><span>wat kan ik doen?</span></button>' +
+    '<button class="snel" data-nieuwafspraak="' + todayKey() + '"><b>Afspraak</b><span>erbij zetten</span></button>' +
+    '</div>';
+
+  h += '<div class="veld invoer"><input type="text" id="zeg" placeholder="Iets wat ik moet weten? Typ het hier.">' +
+    '<button class="btn accent slim" data-zeg="1">Zeggen</button></div>';
 
   nudges().forEach(n => {
     h += '<div class="nudge ' + (n.toon === 'let op' ? 'warm' : '') + '">' + esc(n.tekst) + '</div>';
   });
 
-  h += '<div class="section"><h2>Je dag</h2><button class="link" data-nieuwafspraak="' + todayKey() + '">afspraak erbij</button></div>';
-  if (!rijen.length) {
-    h += leeg('Lege dag. Lekker.');
-  } else {
-    h += '<div class="card tight"><ul class="rows tijdlijn">' + rijen.map(tijdRij).join('') + '</ul></div>';
-  }
+  (state.notes && state.notes[todayKey()] || []).forEach(t => {
+    h += '<div class="nudge">' + esc(t) + '</div>';
+  });
 
-  const v = huidigeVraag();
-  if (v) {
-    h += '<div class="section"><h2>Vraagje</h2></div>' +
-      '<div class="card"><p>' + esc(v.tekst) + '</p>' +
-      '<input type="text" id="antwoord" placeholder="typ maar, kort mag" style="margin-top:12px">' +
-      '<div class="btn-row"><button class="btn ghost slim" data-vraagskip="1">later</button>' +
-      '<button class="btn accent slim" data-vraag="' + v.goal.id + '|' + v.vraag.id + '">opslaan</button></div></div>';
-  }
+  h += '<div class="section"><h2>Je dag</h2><span class="small dim">' + dagSamenvatting(d) + '</span></div>';
+  h += dagBlokkenHtml(d);
 
   const gew = laatsteGewicht();
   h += statRow([
@@ -683,6 +867,12 @@ function screenVandaag() {
     { v: gew ? fmtKg(gew.kg) : '&mdash;', k: 'jouw gewicht' }
   ]);
   return h;
+}
+
+function dagSamenvatting(d) {
+  const vrij = gapsOn(d, 20).filter(g => !g.vroeg).reduce((n, g) => n + g.lengte, 0);
+  if (state.flags.rustdagen && state.flags.rustdagen[dateKey(d)]) return 'rustdag';
+  return vrij ? duurTekst(vrij) + ' vrij' : 'volle dag';
 }
 
 function doelenDezeWeek() {
@@ -697,62 +887,64 @@ function leeg(tekst) {
 
 function screenAgenda() {
   const basis = view.month ? parseKey(view.month + '-01') : new Date(today().getFullYear(), today().getMonth(), 1);
-  const eerste = new Date(basis.getFullYear(), basis.getMonth(), 1);
   const dagen = new Date(basis.getFullYear(), basis.getMonth() + 1, 0).getDate();
-  const voor = (eerste.getDay() + 6) % 7;
+  const voor = (new Date(basis.getFullYear(), basis.getMonth(), 1).getDay() + 6) % 7;
+  const gekozen = view.sel || todayKey();
 
   let cellen = '';
-  for (let i = 0; i < voor; i++) cellen += '<div class="day pad"></div>';
+  for (let i = 0; i < voor; i++) cellen += '<div class="dag leeg"></div>';
   for (let n = 1; n <= dagen; n++) {
     const d = new Date(basis.getFullYear(), basis.getMonth(), n);
     const k = dateKey(d);
-    const ev = eventsOn(d);
-    const gym = workoutForDate(d);
-    const gedaan = sessionOn(k);
-    let cls = 'day' + (k === todayKey() ? ' today' : '') + (view.sel === k ? ' sel' : '') + (gedaan ? ' done' : '');
-    let punten = '';
-    if (ev.length) punten += '<span class="dot afspraak"></span>';
-    if (gym && !gedaan) punten += '<span class="dot gym"></span>';
-    cellen += '<button class="' + cls + '" data-day="' + k + '"><span>' + n + '</span>' +
-      (punten ? '<span class="punten">' + punten + '</span>' : '') + '</button>';
+    const soorten = [];
+    eventsOn(d).forEach(e => soorten.push(e.kind));
+    if (workoutForDate(d) && !sessionOn(k)) soorten.push('gym');
+    routinesOn(d).forEach(r => { if (r.kind === 'sport') soorten.push('sport'); });
+
+    const uniek = soorten.filter((x, i2) => soorten.indexOf(x) === i2).slice(0, 4);
+    cellen += '<button class="dag' + (k === gekozen ? ' gekozen' : '') + (k === todayKey() ? ' nu' : '') + '" data-day="' + k + '">' +
+      '<span class="nr">' + n + '</span>' +
+      '<span class="stipjes">' + uniek.map(s => '<i style="background:' + kleurVoor(s) + '"></i>').join('') + '</span></button>';
   }
 
   const vorige = new Date(basis.getFullYear(), basis.getMonth() - 1, 1);
   const volgende = new Date(basis.getFullYear(), basis.getMonth() + 1, 1);
 
-  let h = topbar('Agenda', 'je week en wat erin past');
-  h += '<div class="card"><div class="calhead">' +
+  let h = topbar('Agenda', MONTH_NAMES[basis.getMonth()] + ' ' + basis.getFullYear(),
     '<button class="iconbtn" data-month="' + dateKey(vorige).slice(0, 7) + '">' + ICON.back + '</button>' +
-    '<span class="m">' + MONTH_NAMES[basis.getMonth()] + ' ' + basis.getFullYear() + '</span>' +
-    '<button class="iconbtn" data-month="' + dateKey(volgende).slice(0, 7) + '" style="transform:rotate(180deg)">' + ICON.back + '</button></div>' +
-    '<div class="caldow">' + ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map(x => '<span>' + x + '</span>').join('') + '</div>' +
-    '<div class="calgrid">' + cellen + '</div></div>';
+    '<button class="iconbtn" data-month="' + dateKey(volgende).slice(0, 7) + '" style="transform:rotate(180deg)">' + ICON.back + '</button>');
 
-  const k = view.sel || todayKey();
-  const d = parseKey(k);
-  h += '<div class="section"><h2>' + esc(formatLong(k)) + '</h2>' +
-    '<button class="link" data-nieuwafspraak="' + k + '">afspraak erbij</button></div>';
-  const rijen = dagLijn(d);
-  h += rijen.length
-    ? '<div class="card tight"><ul class="rows tijdlijn">' + rijen.map(tijdRij).join('') + '</ul></div>'
-    : leeg('Niks gepland op deze dag.');
+  h += '<div class="maand"><div class="dagnamen">' +
+    ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map(x => '<span>' + x + '</span>').join('') + '</div>' +
+    '<div class="raster">' + cellen + '</div></div>';
+
+  const d = parseKey(gekozen);
+  h += '<div class="section"><h2>' + esc(formatLong(gekozen)) + '</h2>' +
+    '<button class="link" data-nieuwafspraak="' + gekozen + '">erbij</button></div>';
+  h += dagBlokkenHtml(d, gekozen !== todayKey());
+
+  (state.notes && state.notes[gekozen] || []).forEach(t => { h += '<div class="nudge">' + esc(t) + '</div>'; });
 
   const komend = state.events
-    .filter(e => daysBetween(today(), parseKey(e.date)) >= 0)
-    .sort((a, b) => a.date < b.date ? -1 : 1).slice(0, 6);
+    .filter(e => daysBetween(today(), parseKey(e.date)) > 0)
+    .sort((a, b) => a.date < b.date ? -1 : 1).slice(0, 5);
   if (komend.length) {
     h += '<div class="section"><h2>Komt eraan</h2></div><div class="card tight"><ul class="rows">' +
-      komend.map(e => '<li data-afspraak="' + e.id + '"><span class="idx">' + (e.start || '').slice(0, 2) + '</span>' +
+      komend.map(e => '<li data-afspraak="' + e.id + '">' +
+        '<span class="vak" style="background:' + zacht(kleurVoor(e.kind), 0.2) + ';color:' + kleurVoor(e.kind) + '">' +
+        DAY_SHORT[parseKey(e.date).getDay()] + '</span>' +
         '<span class="main"><span class="name">' + esc(e.title) + '</span><br>' +
-        '<span class="meta">' + esc(formatDate(e.date)) + ', ' + esc(e.start || '') + (e.end ? ' tot ' + esc(e.end) : '') + '</span></span>' +
-        '<span class="right">' + esc(KIND_LABEL[e.kind] || '') + '</span></li>').join('') + '</ul></div>';
+        '<span class="meta">' + esc(formatDate(e.date)) + ', ' + esc(e.start || '') + '</span></span>' +
+        '<span class="right">wijzig</span></li>').join('') + '</ul></div>';
   }
 
-  h += '<div class="section"><h2>Je vaste week</h2><button class="link" data-nieuweroutine="1">erbij</button></div>';
+  h += '<div class="section"><h2>Vaste week</h2><button class="link" data-nieuweroutine="1">erbij</button></div>';
   h += '<div class="card tight"><ul class="rows">' + state.routines.map(r =>
-    '<li data-routine="' + r.id + '"><span class="idx">' + r.days.map(x => DAY_SHORT[x][0]).join('') + '</span>' +
+    '<li data-routine="' + r.id + '">' +
+    '<span class="vak breed" style="background:' + zacht(kleurVoor(r.kind), 0.2) + ';color:' + kleurVoor(r.kind) + '">' +
+    esc(dagenLabel(r.days)) + '</span>' +
     '<span class="main"><span class="name">' + esc(r.title) + '</span><br>' +
-    '<span class="meta">' + r.days.map(x => DAY_SHORT[x]).join(', ') + ' &middot; ' + r.start + ' tot ' + r.end + '</span></span>' +
+    '<span class="meta">' + r.start + ' tot ' + r.end + '</span></span>' +
     '<span class="right">wijzig</span></li>').join('') + '</ul></div>';
   return h;
 }
@@ -761,22 +953,23 @@ function screenAgenda() {
 
 function screenDoelen() {
   const doelen = state.goals.slice().sort((a, b) => goalScore(b) - goalScore(a));
-  let h = topbar('Doelen', 'waar je aan werkt');
+  let h = topbar('Doelen', 'op volgorde van wat nu telt',
+    '<button class="iconbtn" data-nieuwdoel="">' + ICON.plus + '</button>');
 
-  h += '<div class="section"><h2>Nu belangrijk</h2><button class="link" data-nieuwdoel="1">doel erbij</button></div>';
-  if (!doelen.length) h += leeg('Nog geen doelen. Zet er een paar in, dan plan ik ze in je week.');
+  if (!doelen.length) h += leeg('Nog niks. Zet er iets in, dan pas ik het in je week.');
 
   doelen.forEach(g => {
     const gedaan = doneThisWeek(g).length;
     const doel = g.perWeek || 1;
+    const hex = kleurVoor(g.kind);
     const bolletjes = Array.from({ length: Math.max(doel, gedaan) }, (_, i) =>
-      '<span class="bol' + (i < gedaan ? ' aan' : '') + '"></span>').join('');
-    h += '<div class="card' + (g.actief ? '' : ' uit') + '" data-doel="' + g.id + '">' +
+      '<span class="vakje' + (i < gedaan ? ' aan' : '') + '" style="' + (i < gedaan ? 'background:' + hex : '') + '"></span>').join('');
+    h += '<div class="card' + (g.actief ? '' : ' uit') + '">' +
       '<div class="cardhead"><h3>' + esc(g.title) + '</h3>' +
-      '<span class="small dim">' + esc(KIND_LABEL[g.kind] || g.kind) + '</span></div>' +
-      '<div class="bollen">' + bolletjes + '<span class="small dim" style="margin-left:8px">' +
+      '<span class="tag" style="background:' + zacht(hex, 0.2) + ';color:' + hex + '">' + esc(g.prio === 'hoog' ? 'hoog' : g.prio === 'laag' ? 'laag' : KIND_LABEL[g.kind] || g.kind) + '</span></div>' +
+      '<div class="bollen">' + bolletjes + '<span class="small dim" style="margin-left:10px">' +
       gedaan + ' van ' + doel + ' deze week</span></div>' +
-      '<p class="dim small" style="margin-top:8px">' + esc(g.actief ? goalReason(g) : 'staat op pauze') + '</p>' +
+      '<p class="dim small" style="margin-top:10px">' + esc(g.actief ? goalReason(g) : 'staat op pauze') + '</p>' +
       (g.deadline ? '<p class="tiny dim">deadline ' + esc(formatDate(g.deadline)) + '</p>' : '') +
       '<div class="btn-row">' +
       '<button class="btn ghost slim" data-doeldetail="' + g.id + '">bekijken</button>' +
@@ -784,22 +977,12 @@ function screenDoelen() {
       '</div></div>';
   });
 
-  h += '<div class="section"><h2>Vast in je week</h2></div>';
   const w = workoutForDate(today());
-  h += '<div class="card"><div class="cardhead"><h3>Gym</h3><span class="small dim">' +
-    weekStats().count + ' deze week</span></div>' +
+  h += '<div class="section"><h2>Vast in je week</h2></div>';
+  h += '<div class="card"><div class="cardhead"><h3>Gym</h3>' +
+    '<span class="tag" style="background:' + zacht(kleurVoor('gym'), 0.2) + ';color:' + kleurVoor('gym') + '">4 per week</span></div>' +
     '<p class="dim small">' + (w ? 'Vandaag ' + w.title + '.' : 'Vandaag geen gym gepland.') + '</p>' +
-    '<button class="btn ghost slim" data-tab="gym">Naar je schema</button></div>';
-
-  const antwoorden = (state.checkins || []).slice(-5).reverse();
-  if (antwoorden.length) {
-    h += '<div class="section"><h2>Wat je zelf zei</h2></div><div class="card tight"><ul class="rows">' +
-      antwoorden.map(c => {
-        const g = goalById(c.goal);
-        return '<li><span class="main"><span class="name">' + esc(c.antwoord) + '</span><br>' +
-          '<span class="meta">' + esc(g ? g.title : '') + ', ' + esc(formatDate(c.date)) + '</span></span></li>';
-      }).join('') + '</ul></div>';
-  }
+    '<button class="btn ghost slim" data-naar="gym">Naar je schema</button></div>';
   return h;
 }
 
@@ -957,6 +1140,8 @@ function formDoel(id) {
     '<div class="tweekolom">' +
     '<div class="veld"><label for="d-week">Keer per week</label><input id="d-week" type="number" inputmode="numeric" value="' + (g ? g.perWeek : 2) + '"></div>' +
     '<div class="veld"><label for="d-min">Minuten per keer</label><input id="d-min" type="number" inputmode="numeric" value="' + (g ? g.minutes : 30) + '"></div></div>' +
+    '<div class="veld"><label for="d-prio">Hoe belangrijk</label><select id="d-prio">' +
+    PRIO.map(p => '<option value="' + p.id + '"' + (g && g.prio === p.id ? ' selected' : '') + '>' + esc(p.label) + '</option>').join('') + '</select></div>' +
     '<div class="veld"><label for="d-deadline">Deadline, als die er is</label><input id="d-deadline" type="date" value="' + esc(g ? (g.deadline || '') : '') + '"></div>' +
     '<button class="btn accent" data-opslaandoel="' + (g ? g.id : '') + '">Opslaan</button>' +
     (g ? '<button class="btn ghost slim" data-pauzedoel="' + g.id + '">' + (g.actief ? 'Even op pauze' : 'Weer oppakken') + '</button>' +
@@ -972,7 +1157,7 @@ function opslaanDoel(id) {
     id: id || 'g' + Date.now(), title: titel, kind: el('d-kind').value,
     perWeek: Math.max(1, Number(el('d-week').value) || 1),
     minutes: Math.max(10, Number(el('d-min').value) || 30),
-    deadline: el('d-deadline').value, actief: oud ? oud.actief : true,
+    deadline: el('d-deadline').value, prio: el('d-prio').value, actief: oud ? oud.actief : true,
     log: oud ? oud.log : []
   };
   state.goals = state.goals.filter(x => x.id !== nieuw.id).concat([nieuw]);
@@ -986,7 +1171,7 @@ function doelDetail(id) {
   const g = goalById(id);
   if (!g) return;
   const log = goalLog(g).slice(-8).reverse();
-  const antwoorden = (state.checkins || []).filter(c => c.goal === g.id).reverse();
+  const antwoorden = [];
   let h = '<h2>' + esc(g.title) + '</h2>' +
     '<p class="dim small">' + esc(goalReason(g)) + '. ' + (g.perWeek || 1) + ' keer per week, ' + (g.minutes || 30) + ' minuten.</p>';
   if (antwoorden.length) {
@@ -1674,60 +1859,85 @@ function gewichtsVerschil() {
   return { verschil: nu.kg - oud.kg, sinds: oud.date };
 }
 
+function rijtje(titel, waarde, actie) {
+  return '<li' + (actie ? ' ' + actie : '') + '><span class="main"><span class="name">' + esc(titel) + '</span></span>' +
+    '<span class="right">' + waarde + '</span></li>';
+}
+
 function screenProfiel() {
   chartData = {};
   const p = state.profile;
   const gew = laatsteGewicht();
   const versch = gewichtsVerschil();
+  const lijst = state.weights.slice().sort((a, b) => a.date < b.date ? -1 : 1);
 
-  let h = topbar('Meer', 'jezelf, je gym en je gegevens');
-  h += '<div class="card tight"><ul class="rows">' +
-    '<li data-naar="gym"><span class="idx">G</span><span class="main"><span class="name">Gym</span><br>' +
-    '<span class="meta">schema, training starten, records</span></span><span class="right">open</span></li>' +
-    '<li data-tab-mob="1"><span class="idx">M</span><span class="main"><span class="name">Mobiliteit</span><br>' +
-    '<span class="meta">twee routines met een timer</span></span><span class="right">open</span></li>' +
+  let h = topbar('Profiel', 'alles over jou op een rij');
+
+  /* wie je bent */
+  h += '<div class="card"><div class="cardhead"><h3>Jij</h3>' +
+    '<button class="link" data-bewerkprofiel="1">wijzig</button></div>' +
+    '<ul class="rows">' +
+    rijtje('Naam', esc(p.naam || 'nog niet ingevuld')) +
+    rijtje('Leeftijd', leeftijd() ? leeftijd() + ' jaar' : '&mdash;') +
+    rijtje('Lengte', p.lengte ? p.lengte + ' cm' : '&mdash;') +
+    rijtje('Gewicht', gew ? fmtKg(gew.kg) + ' kg' : '&mdash;') +
     '</ul></div>';
 
-  h += '<div class="card"><div class="cardhead"><h3>Over jou</h3></div>' +
-    '<div class="veld"><label for="p-naam">Naam</label><input id="p-naam" type="text" placeholder="je voornaam" value="' + esc(p.naam) + '" data-profiel="naam"></div>' +
-    '<div class="tweekolom">' +
-    '<div class="veld"><label for="p-jaar">Geboortejaar</label><input id="p-jaar" type="number" inputmode="numeric" placeholder="2008" value="' + esc(p.geboortejaar) + '" data-profiel="geboortejaar"></div>' +
-    '<div class="veld"><label for="p-lengte">Lengte in cm</label><input id="p-lengte" type="number" inputmode="numeric" placeholder="180" value="' + esc(p.lengte) + '" data-profiel="lengte"></div>' +
-    '</div>' + (leeftijd() ? '<p class="tiny dim">' + leeftijd() + ' jaar.</p>' : '') + '</div>';
+  /* je week in het kort */
+  const uren = state.routines.reduce((n, r) => n + r.days.length * (toMin(r.end) - toMin(r.start)) / 60, 0);
+  h += '<div class="card"><div class="cardhead"><h3>Je week</h3>' +
+    '<button class="link" data-tab="agenda">wijzig</button></div>' +
+    '<ul class="rows">' + state.routines.map(r =>
+      '<li><span class="vak breed" style="background:' + zacht(kleurVoor(r.kind), 0.2) + ';color:' + kleurVoor(r.kind) + '">' +
+      esc(dagenLabel(r.days)) + '</span>' +
+      '<span class="main"><span class="name">' + esc(r.title) + '</span></span>' +
+      '<span class="right">' + r.start + ' - ' + r.end + '</span></li>').join('') +
+    '</ul><p class="tiny dim mt">Samen ' + Math.round(uren) + ' uur per week vast.</p></div>';
 
-  /* gewicht bijhouden */
-  const lijst = state.weights.slice().sort((a, b) => a.date < b.date ? -1 : 1);
-  if (lijst.length) chartData['c-gew'] = { points: lijst.map(x => ({ x: parseKey(x.date).getTime(), y: x.kg, label: formatDate(x.date) })) };
-  h += '<div class="card"><div class="cardhead"><h3>Lichaamsgewicht</h3>' +
-    (gew ? '<span class="small dim">' + esc(formatDate(gew.date)) + '</span>' : '') + '</div>';
+  /* waar je aan werkt */
+  const actief = state.goals.filter(g => g.actief).sort((a, b) => goalScore(b) - goalScore(a));
+  h += '<div class="card"><div class="cardhead"><h3>Waar je aan werkt</h3>' +
+    '<button class="link" data-tab="doelen">alles</button></div>' +
+    '<ul class="rows">' + actief.slice(0, 5).map(g =>
+      '<li data-doeldetail="' + g.id + '"><span class="vak" style="background:' + zacht(kleurVoor(g.kind), 0.2) + ';color:' + kleurVoor(g.kind) + '">' +
+      (g.prio === 'hoog' ? '!' : g.title.charAt(0).toUpperCase()) + '</span>' +
+      '<span class="main"><span class="name">' + esc(g.title) + '</span><br>' +
+      '<span class="meta">' + g.perWeek + ' keer per week, ' + g.minutes + ' min</span></span>' +
+      '<span class="right">' + doneThisWeek(g).length + '/' + g.perWeek + '</span></li>').join('') +
+    '</ul></div>';
+
+  /* gym en lichaam */
+  h += '<div class="card"><div class="cardhead"><h3>Gym en lichaam</h3>' +
+    '<button class="link" data-naar="gym">open</button></div>';
   if (gew) {
     h += '<div class="bigrow"><div><div class="big">' + fmtKg(gew.kg) + '<span class="unitbig">kg</span></div>' +
       '<div class="dim small">' + (versch
         ? (versch.verschil >= 0 ? '+' : '') + fmtKg(versch.verschil) + ' kg sinds ' + formatDate(versch.sinds)
         : 'eerste meting') + '</div></div></div>';
-    if (lijst.length > 1) h += '<canvas data-chart="c-gew"></canvas>';
+    if (lijst.length > 1) {
+      chartData['c-gew'] = { points: lijst.map(x => ({ x: parseKey(x.date).getTime(), y: x.kg, label: formatDate(x.date) })) };
+      h += '<canvas data-chart="c-gew"></canvas>';
+    }
   } else {
-    h += '<p class="dim small">Weeg jezelf een keer per week, op hetzelfde moment. Aankomen mag rustig gaan, ongeveer een halve kilo per week is genoeg om spieren te bouwen.</p>';
+    h += '<p class="dim small">Weeg jezelf een keer per week op hetzelfde moment. Een halve kilo per maand erbij is genoeg om spieren te bouwen.</p>';
   }
   h += '<div class="invoerrij"><input type="number" inputmode="decimal" step="0.1" placeholder="kg vandaag" id="w-kg">' +
     '<button class="btn accent" data-addweight="1">' + ICON.plus + '</button></div>';
-  if (lijst.length) {
-    h += '<ul class="rows mt">' + lijst.slice(-4).reverse().map(x =>
-      '<li><span class="main"><span class="name">' + fmtKg(x.kg) + ' kg</span></span>' +
-      '<span class="right">' + esc(formatDate(x.date)) + ' <button class="mini" data-delweight="' + x.date + '">wis</button></span></li>').join('') + '</ul>';
-  }
-  h += '</div>';
+  h += '<ul class="rows mt">' +
+    rijtje('Trainingen deze week', weekStats().count) +
+    rijtje('Weken op rij', streakWeeks()) +
+    rijtje('Fase', currentPhase() === 'kracht' ? 'kracht' : 'triathlon week ' + triathlonWeek()) +
+    '</ul></div>';
 
-  /* doel en fase */
-  h += '<div class="card"><div class="cardhead"><h3>Doel</h3><span class="pill' + (currentPhase() === 'kracht' ? ' grey' : '') + '">' + (currentPhase() === 'kracht' ? 'Krachtfase' : 'Triathlonfase') + '</span></div>';
+  /* doel op de lange baan */
+  h += '<div class="card"><div class="cardhead"><h3>Wedstrijd of race</h3></div>';
   if (state.goal) {
     const w = weeksToGo();
     h += '<p>' + esc(goalLabel(state.goal.type)) + ' op ' + esc(formatLong(state.goal.date)) + '.</p>' +
-      '<p class="dim small">Nog ' + plural(w, 'week', 'weken') + '. ' +
-      (currentPhase() === 'triathlon' ? 'Je traint nu voor de afstand.' : 'Vanaf tien weken ervoor schakelt de app om.') + '</p>' +
-      '<button class="btn ghost danger slim" data-goal="remove">Doel weghalen</button>';
+      '<p class="dim small">Nog ' + plural(w, 'week', 'weken') + '.</p>' +
+      '<button class="btn ghost danger slim" data-goal="remove">Weghalen</button>';
   } else {
-    h += '<p class="dim small">Zonder doel blijf je kracht opbouwen. Vul je een wedstrijddatum in, dan schakelt de app tien weken van tevoren om.</p>' +
+    h += '<p class="dim small">Vul een datum in als je ergens naartoe traint, dan schakelt het schema tien weken van tevoren om.</p>' +
       '<div class="veld"><label for="goal-type">Wat</label><select id="goal-type">' +
       GOAL_TYPES.map(g => '<option value="' + g.id + '">' + esc(g.label) + '</option>').join('') + '</select></div>' +
       '<div class="veld"><label for="goal-date">Wanneer</label><input type="date" id="goal-date"></div>' +
@@ -1735,33 +1945,32 @@ function screenProfiel() {
   }
   h += '</div>';
 
-  /* cijfers */
-  const weken = state.sessions.length ? Math.max(1, Math.ceil(daysBetween(parseKey(state.sessions.slice().sort((a, b) => a.ts - b.ts)[0].date), today()) / 7)) : 0;
-  h += statRow([
-    { v: state.sessions.length, k: state.sessions.length === 1 ? 'training' : 'trainingen' },
-    { v: weken, k: weken === 1 ? 'week bezig' : 'weken bezig' },
-    { v: state.mobility.length, k: 'keer mobiliteit' }
-  ]);
-
-  h += '<div class="section"><h2>Oefening opzoeken</h2></div><div class="card tight"><ul class="rows">' +
-    Object.keys(EXERCISE_INFO).map(n =>
-      '<li data-info="' + esc(n) + '"><span class="main"><span class="name">' + esc(n) + '</span></span>' +
-      '<span class="right">' + ICON.info + '</span></li>').join('') + '</ul></div>';
-
+  /* instellingen */
   const s = state.settings;
-  h += '<div class="section"><h2>Instellingen</h2></div><div class="card">' +
+  h += '<div class="card"><div class="cardhead"><h3>Instellingen</h3></div>' +
     '<div class="veld"><label for="r1">Rust bij de eerste twee oefeningen</label>' + restSelect('r1', 'rest1', s.rest1) + '</div>' +
     '<div class="veld"><label for="r2">Rust bij de rest</label>' + restSelect('r2', 'rest2', s.rest2) + '</div>' +
     '<div class="check' + (s.sound ? ' on' : '') + '" data-sound="1" style="margin-top:14px">' +
     '<span class="box">' + ICON.check + '</span><span class="main"><span class="name">Piepje als de rust voorbij is</span></span></div></div>';
 
-  h += '<div class="section"><h2>Je gegevens</h2></div><div class="card">' +
-    '<p class="dim small">Alles staat op dit apparaat. Maak af en toe een back-up, dan raak je niks kwijt en kun je het op je laptop terugzetten.</p>' +
+  /* gegevens */
+  h += '<div class="card"><div class="cardhead"><h3>Je gegevens</h3></div>' +
+    '<p class="dim small">Alles staat op dit apparaat. Maak af en toe een back-up.</p>' +
     '<button class="btn slim" data-backup="1">Back-up kopieren</button>' +
     '<button class="btn slim" data-import="1">Back-up terugzetten</button>' +
     '<button class="btn slim" data-export="1">Samenvatting voor Claude</button>' +
     '<button class="btn ghost danger slim" data-wipe="1">Alles wissen</button></div>';
   return h;
+}
+
+function formProfiel() {
+  const p = state.profile;
+  showModal('<h2>Over jou</h2>' +
+    '<div class="veld"><label for="p-naam">Naam</label><input id="p-naam" type="text" value="' + esc(p.naam) + '" data-profiel="naam"></div>' +
+    '<div class="tweekolom">' +
+    '<div class="veld"><label for="p-jaar">Geboortejaar</label><input id="p-jaar" type="number" inputmode="numeric" placeholder="2008" value="' + esc(p.geboortejaar) + '" data-profiel="geboortejaar"></div>' +
+    '<div class="veld"><label for="p-lengte">Lengte in cm</label><input id="p-lengte" type="number" inputmode="numeric" placeholder="182" value="' + esc(p.lengte) + '" data-profiel="lengte"></div></div>' +
+    '<button class="btn accent" data-close="1">Klaar</button>');
 }
 
 function addWeight() {
@@ -2011,16 +2220,19 @@ document.addEventListener('click', e => {
   }
   if ((n = hit('skipdoel'))) return skipDoel(n.dataset.skipdoel);
 
-  /* vragen */
-  if ((n = hit('vraag'))) {
-    const p = n.dataset.vraag.split('|');
-    const antwoord = el('antwoord').value.trim();
-    if (!antwoord) return alert('Typ even iets, hoe kort ook.');
-    beantwoordVraag(p[0], p[1], antwoord);
+  /* iets vertellen en tijd hebben */
+  if ((n = hit('zeg'))) return zegIets();
+  if ((n = hit('bewerkprofiel'))) return formProfiel();
+  if ((n = hit('vraagtijd'))) return vraagTijd();
+  if ((n = hit('nutijd'))) return nuTijd(Number(n.dataset.nutijd));
+  if ((n = hit('zetprio'))) {
+    const p = n.dataset.zetprio.split('|');
+    const g = goalById(p[0]);
+    if (g) { g.prio = p[1]; save(); }
+    closeModal();
     render();
     return toast('Genoteerd');
   }
-  if ((n = hit('vraagskip'))) { state.flags.vraagDatum = todayKey(); save(); return render(); }
   if ((n = hit('vtab'))) return go('voortgang', { deel: n.dataset.vtab, ex: view.ex });
   if ((n = hit('addweight'))) return addWeight();
   if ((n = hit('delweight'))) {

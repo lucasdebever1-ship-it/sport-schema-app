@@ -287,13 +287,28 @@ const EVENT_KINDS = [
 const DAG_START = '07:00';
 const DAG_EIND = '22:30';
 
-/* Vragen die de app stelt om je doelen scherper te krijgen. Eén per keer. */
-const VRAGEN = [
-  { id: 'stap', tekst: 'Wat is de eerstvolgende kleine stap voor {doel}?', bijKind: null },
-  { id: 'maand', tekst: 'Waar wil je met {doel} over een maand staan?', bijKind: null },
-  { id: 'blok', tekst: 'Hoeveel avonden per week past {doel} echt in je week?', bijKind: null },
-  { id: 'rem', tekst: 'Wat hield je deze week tegen bij {doel}?', bijKind: null },
-  { id: 'onderwerp', tekst: 'Heb je al een onderwerp voor {doel}, en wat trekt je daarin?', bijKind: 'school' },
-  { id: 'gerecht', tekst: 'Welk gerecht wil je bij {doel} als eerste onder de knie hebben?', bijKind: 'leren' },
-  { id: 'af', tekst: 'Wanneer is {doel} wat jou betreft af?', bijKind: 'maken' }
+/* Eén kleur per soort, overal hetzelfde. */
+const KLEUREN = {
+  school:      { hex: '#6FA8FF', naam: 'school' },
+  sport:       { hex: '#B79BE0', naam: 'sport' },
+  werk:        { hex: '#F2C14E', naam: 'werk' },
+  afspraak:    { hex: '#7FD4C1', naam: 'afspraak' },
+  sociaal:     { hex: '#FF7BA3', naam: 'sociaal' },
+  gym:         { hex: '#FF8A4C', naam: 'gym' },
+  mobiliteit:  { hex: '#7FD4C1', naam: 'mobiliteit' },
+  maken:       { hex: '#8FD3FF', naam: 'maken' },
+  leren:       { hex: '#9EE37D', naam: 'leren' },
+  anders:      { hex: '#A89D8E', naam: 'anders' }
+};
+
+const PRIO = [
+  { id: 'hoog', label: 'Hoog, dit gaat voor' },
+  { id: 'normaal', label: 'Normaal' },
+  { id: 'laag', label: 'Laag, als er tijd over is' }
 ];
+
+/* Woorden waar de app op let als je iets intypt. */
+const WOORDEN = {
+  morgen: 1, overmorgen: 2, vandaag: 0,
+  dagen: { zondag: 0, maandag: 1, dinsdag: 2, woensdag: 3, donderdag: 4, vrijdag: 5, zaterdag: 6 }
+};
