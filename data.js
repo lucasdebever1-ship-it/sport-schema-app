@@ -257,8 +257,7 @@ const DEFAULT_ROUTINES = [
   { id: 'school', title: 'School', kind: 'school', days: [1, 2, 3, 4, 5], start: '08:30', end: '15:30', energie: -1 },
   { id: 'hockey-di', title: 'Hockeytraining', kind: 'sport', days: [2], start: '19:00', end: '21:00', energie: -2 },
   { id: 'hockey-do', title: 'Hockeytraining', kind: 'sport', days: [4], start: '19:00', end: '21:00', energie: -2 },
-  { id: 'wedstrijd', title: 'Hockeywedstrijd', kind: 'sport', days: [6], start: '09:00', end: '15:00', energie: -2 },
-  { id: 'werk', title: 'Werk', kind: 'werk', days: [0], start: '09:00', end: '17:00', energie: -1 }
+  { id: 'wedstrijd', title: 'Hockeywedstrijd', kind: 'sport', days: [6], start: '09:00', end: '15:00', energie: -2 }
 ];
 
 /* Waar je aan werkt naast school en sport. Ook dit is later aan te passen. */

@@ -411,7 +411,7 @@ function candidates(d) {
     });
   });
 
-  const zwaarVandaag = blocksOn(d).some(b => b.energie <= -2);
+  const zwaarVandaag = blocksOn(d).some(b => b.energie <= -2) || !!sessionOn(k);
   if (zwaarVandaag && !state.mobility.some(m => m.date === k)) {
     lijst.push({
       soort: 'mobiliteit', id: 'heupen-benen', titel: 'Mobiliteit',
@@ -583,6 +583,22 @@ function verwerkZin(tekst) {
     }
   }
 
+  /* iets wat elke week terugkomt hoort in je vaste week */
+  if (tijden && /\b(elke|iedere|altijd|wekelijks|standaard)\b/.test(t)) {
+    const dag = vindWeekdag(t);
+    if (dag !== null) {
+      const soort = /werk|bijbaan/.test(t) ? 'werk' : /hockey|training|sport|zwem/.test(t) ? 'sport'
+        : /les|school|bijles/.test(t) ? 'school' : 'anders';
+      const r = {
+        id: 'r' + Date.now(), title: netteTitel(tekst), kind: soort, days: [dag],
+        start: tijden.van, end: tijden.tot, energie: soort === 'sport' ? -2 : -1
+      };
+      state.routines.push(r);
+      save();
+      return { tekst: r.title + ' staat nu elke ' + DAY_NAMES[dag] + ' in je week, ' + r.start + ' tot ' + r.end + '.' };
+    }
+  }
+
   /* iets met een tijd erin is een afspraak */
   if (tijden) {
     const dag = datum || todayKey();
@@ -609,9 +625,17 @@ function verwerkZin(tekst) {
 function netteTitel(tekst) {
   let s = tekst.replace(/^\s*(ik\s+(heb|ga|moet|werk)?)\s*/i, m => /werk/i.test(m) ? 'werk ' : '').replace(/\b(van|tot|om|op)\s*\d{1,2}([:.]\d{2})?\b/gi, ' ')
     .replace(/\b(vandaag|morgen|overmorgen|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/gi, ' ')
+    .replace(/\b(elke|iedere|altijd|wekelijks|standaard)\b/gi, ' ')
     .replace(/\s+/g, ' ').replace(/^[ ,.-]+|[ ,.-]+$/g, '').trim();
   if (!s) s = 'Afspraak';
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function vindWeekdag(t) {
+  for (const naam in WOORDEN.dagen) {
+    if (new RegExp('\\b' + naam + '\\b').test(t)) return WOORDEN.dagen[naam];
+  }
+  return null;
 }
 
 function vindDatum(t) {
@@ -862,9 +886,9 @@ function screenVandaag() {
 
   const gew = laatsteGewicht();
   h += statRow([
-    { v: doelenDezeWeek(), k: 'doelen deze week' },
+    { v: doelenDezeWeek(), k: 'doelen' },
     { v: weekStats().count, k: 'trainingen' },
-    { v: gew ? fmtKg(gew.kg) : '&mdash;', k: 'jouw gewicht' }
+    { v: gew ? fmtKg(gew.kg) : '&mdash;', k: 'kilo' }
   ]);
   return h;
 }
@@ -890,38 +914,46 @@ function screenAgenda() {
   const dagen = new Date(basis.getFullYear(), basis.getMonth() + 1, 0).getDate();
   const voor = (new Date(basis.getFullYear(), basis.getMonth(), 1).getDay() + 6) % 7;
   const gekozen = view.sel || todayKey();
+  const vorige = new Date(basis.getFullYear(), basis.getMonth() - 1, 1);
+  const volgende = new Date(basis.getFullYear(), basis.getMonth() + 1, 1);
 
-  let cellen = '';
-  for (let i = 0; i < voor; i++) cellen += '<div class="dag leeg"></div>';
+  let h = topbar(MONTH_NAMES[basis.getMonth()], String(basis.getFullYear()),
+    '<button class="iconbtn" data-month="' + dateKey(vorige).slice(0, 7) + '">' + ICON.back + '</button>' +
+    '<button class="iconbtn" data-vandaag="1">' + ICON.cal + '</button>' +
+    '<button class="iconbtn" data-month="' + dateKey(volgende).slice(0, 7) + '" style="transform:rotate(180deg)">' + ICON.back + '</button>');
+
+  h += '<div class="dagnamen">' + ['M', 'D', 'W', 'D', 'V', 'Z', 'Z'].map(x => '<span>' + x + '</span>').join('') + '</div>';
+
+  /* het raster, per week een rij met een dun lijntje erboven */
+  h += '<div class="maand"><div class="week">';
+  let cel = 0;
+  for (let i = 0; i < voor; i++) { h += '<span class="dag leeg"></span>'; cel++; }
   for (let n = 1; n <= dagen; n++) {
+    if (cel % 7 === 0 && cel > 0) h += '</div><div class="week">';
     const d = new Date(basis.getFullYear(), basis.getMonth(), n);
     const k = dateKey(d);
     const soorten = [];
     eventsOn(d).forEach(e => soorten.push(e.kind));
     if (workoutForDate(d) && !sessionOn(k)) soorten.push('gym');
-    routinesOn(d).forEach(r => { if (r.kind === 'sport') soorten.push('sport'); });
-
+    routinesOn(d).forEach(r => { if (r.kind !== 'school') soorten.push(r.kind); });
     const uniek = soorten.filter((x, i2) => soorten.indexOf(x) === i2).slice(0, 4);
-    cellen += '<button class="dag' + (k === gekozen ? ' gekozen' : '') + (k === todayKey() ? ' nu' : '') + '" data-day="' + k + '">' +
-      '<span class="nr">' + n + '</span>' +
+
+    h += '<button class="dag' + (k === gekozen ? ' gekozen' : '') + '" data-day="' + k + '">' +
+      '<span class="nr' + (k === todayKey() ? ' nu' : '') + '">' + n + '</span>' +
       '<span class="stipjes">' + uniek.map(s => '<i style="background:' + kleurVoor(s) + '"></i>').join('') + '</span></button>';
+    cel++;
   }
+  while (cel % 7 !== 0) { h += '<span class="dag leeg"></span>'; cel++; }
+  h += '</div></div>';
 
-  const vorige = new Date(basis.getFullYear(), basis.getMonth() - 1, 1);
-  const volgende = new Date(basis.getFullYear(), basis.getMonth() + 1, 1);
-
-  let h = topbar('Agenda', MONTH_NAMES[basis.getMonth()] + ' ' + basis.getFullYear(),
-    '<button class="iconbtn" data-month="' + dateKey(vorige).slice(0, 7) + '">' + ICON.back + '</button>' +
-    '<button class="iconbtn" data-month="' + dateKey(volgende).slice(0, 7) + '" style="transform:rotate(180deg)">' + ICON.back + '</button>');
-
-  h += '<div class="maand"><div class="dagnamen">' +
-    ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map(x => '<span>' + x + '</span>').join('') + '</div>' +
-    '<div class="raster">' + cellen + '</div></div>';
-
+  /* de gekozen dag eronder */
   const d = parseKey(gekozen);
   h += '<div class="section"><h2>' + esc(formatLong(gekozen)) + '</h2>' +
     '<button class="link" data-nieuwafspraak="' + gekozen + '">erbij</button></div>';
-  h += dagBlokkenHtml(d, gekozen !== todayKey());
+  const rijen = dagLijn(d);
+  h += rijen.length
+    ? '<ul class="dagijst">' + rijen.map(r => blokRij(r, gekozen !== todayKey())).join('') + '</ul>'
+    : leeg('Niks op deze dag.');
 
   (state.notes && state.notes[gekozen] || []).forEach(t => { h += '<div class="nudge">' + esc(t) + '</div>'; });
 
@@ -939,16 +971,17 @@ function screenAgenda() {
   }
 
   h += '<div class="section"><h2>Vaste week</h2><button class="link" data-nieuweroutine="1">erbij</button></div>';
-  h += '<div class="card tight"><ul class="rows">' + state.routines.map(r =>
+  h += '<div class="card tight"><ul class="rows">' + (state.routines.length ? state.routines.map(r =>
     '<li data-routine="' + r.id + '">' +
     '<span class="vak breed" style="background:' + zacht(kleurVoor(r.kind), 0.2) + ';color:' + kleurVoor(r.kind) + '">' +
     esc(dagenLabel(r.days)) + '</span>' +
     '<span class="main"><span class="name">' + esc(r.title) + '</span><br>' +
     '<span class="meta">' + r.start + ' tot ' + r.end + '</span></span>' +
-    '<span class="right">wijzig</span></li>').join('') + '</ul></div>';
+    '<span class="right">wijzig</span></li>').join('') :
+    '<li><span class="main"><span class="meta">Nog niks vasts. Zet je school en trainingen erin.</span></span></li>') +
+    '</ul></div>';
   return h;
 }
-
 /* ================= doelen ================= */
 
 function screenDoelen() {
@@ -1596,7 +1629,20 @@ function finishSession() {
   keepAwake(false);
   go('vandaag');
   const last = state.sessions[state.sessions.length - 1];
-  toast('Opgeslagen: ' + last.title + ', ' + sessionSummaryLine(last));
+  if (!state.mobility.some(m => m.date === last.date)) naTrainingMobiliteit(last);
+  else toast('Opgeslagen: ' + last.title + ', ' + sessionSummaryLine(last));
+}
+
+/* Meteen na je training even losmaken, met de oefeningen erbij. */
+function naTrainingMobiliteit(sessie) {
+  const r = MOBILITY[String(sessie.workoutId).indexOf('benen') !== -1 ? 0 : 1];
+  showModal('<h2>' + esc(sessie.title) + ' staat erin</h2>' +
+    '<p class="dim small">' + esc(sessionSummaryLine(sessie)) + '. Nog even losmaken?</p>' +
+    '<div class="card tight mt"><ul class="rows">' +
+    r.exercises.map(x => '<li><span class="main"><span class="name">' + esc(x) + '</span></span>' +
+      '<span class="right">' + r.seconds + 's per kant</span></li>').join('') + '</ul></div>' +
+    '<button class="btn accent" data-mob="' + r.id + '">' + esc(r.title) + ' doen</button>' +
+    '<button class="btn ghost slim" data-close="1">Nu even niet</button>');
 }
 
 function cancelSession() {
@@ -2261,7 +2307,7 @@ document.addEventListener('click', e => {
 
   /* kalender */
   if ((n = hit('month'))) return go('kalender', { month: n.dataset.month, sel: view.sel });
-  if ((n = hit('day'))) { closeModal(); return go('kalender', { sel: n.dataset.day, month: n.dataset.day.slice(0, 7) }); }
+  if ((n = hit('day'))) { closeModal(); return go('agenda', { sel: n.dataset.day, month: n.dataset.day.slice(0, 7) }); }
 
   /* warming-up */
   if ((n = hit('warm'))) return toggleWarm(Number(n.dataset.warm));
@@ -2345,5 +2391,15 @@ window.addEventListener('resize', drawCharts);
 /* ================= start ================= */
 
 if (state.active && state.active.date !== todayKey()) { state.active = null; }
+
+/* Het standaard werkblok stond er ten onrechte in. Eenmalig weghalen. */
+if (!state.flags.werkWeg) {
+  const werk = state.routines.find(r => r.id === 'werk');
+  if (werk && werk.title === 'Werk' && werk.start === '09:00' && werk.end === '17:00') {
+    state.routines = state.routines.filter(r => r.id !== 'werk');
+  }
+  state.flags.werkWeg = true;
+  save();
+}
 save();
 render();

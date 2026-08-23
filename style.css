@@ -78,21 +78,21 @@ ul{margin:0;padding:0;list-style:none}
 
 .pill{
   display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent);
-  border-radius:8px;padding:5px 11px;font-size:13px;font-weight:600
+  border-radius:0;padding:5px 10px;font-size:13px;font-weight:600
 }
 .pill.grey{background:var(--surface-2);color:var(--dim)}
 .phaseline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 16px}
 
 /* ---------- lijsten ---------- */
-.rows>li{display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--line-soft)}
+.rows>li{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--line-soft);min-height:56px}
 .rows>li:last-child{border-bottom:0}
 .rows .main{flex:1;min-width:0}
-.rows .name{font-size:16px}
-.rows .meta{font-size:13.5px;color:var(--dim)}
+.rows .name{font-size:16px;line-height:1.3}
+.rows .meta{font-size:13.5px;color:var(--dim);line-height:1.35}
 .rows .right{color:var(--dim);font-size:14.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .rows .right strong{color:var(--text);font-weight:650}
 .idx{
-  width:32px;height:32px;flex:none;border-radius:10px;background:var(--surface-2);color:var(--dim);
+  width:32px;height:32px;flex:none;border-radius:0;background:var(--surface-2);color:var(--dim);
   display:grid;place-items:center;font-size:13px;font-weight:700
 }
 .idx.done{background:var(--accent);color:var(--accent-ink)}
@@ -162,7 +162,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 /* ---------- afvinken ---------- */
 .check{display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--line-soft);cursor:pointer}
 .check:last-child{border-bottom:0}
-.box{width:28px;height:28px;flex:none;border-radius:8px;box-shadow:inset 0 0 0 2px var(--line);display:grid;place-items:center}
+.box{width:28px;height:28px;flex:none;border-radius:0;box-shadow:inset 0 0 0 2px var(--line);display:grid;place-items:center}
 .box svg{width:16px;height:16px;opacity:0}
 .check.on .box{background:var(--accent);box-shadow:none}
 .check.on .box svg{opacity:1;color:var(--accent-ink)}
@@ -171,7 +171,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 /* ---------- chips van oefeningen ---------- */
 .chips{display:flex;gap:7px;overflow-x:auto;margin:16px 0 18px;padding-bottom:2px}
 .chip{
-  flex:none;width:36px;height:36px;border-radius:10px;border:0;
+  flex:none;width:36px;height:36px;border-radius:0;border:0;
   background:var(--surface);color:var(--dim-2);font-size:14px;font-weight:700;cursor:pointer
 }
 .chip.part{color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent-soft)}
@@ -218,12 +218,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   display:flex;background:var(--surface);border-radius:var(--r);padding:18px 8px;margin-bottom:14px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.035)
 }
-.stat{flex:1;text-align:center;padding:0 6px;position:relative}
+.stat{flex:1;text-align:center;padding:0 6px;position:relative;display:flex;flex-direction:column;justify-content:flex-start}
 .stat + .stat::before{
   content:"";position:absolute;left:0;top:4px;bottom:4px;width:1px;background:var(--line-soft)
 }
 .stat .v{font-size:25px;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
-.stat .k{font-size:13.5px;color:var(--dim);margin-top:3px}
+.stat .k{font-size:13.5px;color:var(--dim);margin-top:3px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .bigrow{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin:4px 0 16px}
 .big{font-size:46px;font-weight:800;letter-spacing:-.035em;line-height:1;font-variant-numeric:tabular-nums}
@@ -346,7 +346,7 @@ canvas{display:block;width:100%;height:140px}
 
 /* ---------- doelen ---------- */
 .bollen{display:flex;align-items:center;gap:6px;margin-top:4px}
-.bol{width:11px;height:11px;border-radius:3px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.bol{width:11px;height:11px;border-radius:0;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
 .bol.aan{background:var(--accent);box-shadow:none}
 .card.uit{opacity:.55}
 
@@ -381,7 +381,7 @@ canvas{display:block;width:100%;height:140px}
 .dagrij{display:flex;align-items:stretch;gap:10px}
 .dagrij .uur{
   width:44px;flex:none;font-size:13.5px;font-weight:650;font-variant-numeric:tabular-nums;
-  color:var(--dim);line-height:1.3;padding-top:12px;text-align:right
+  color:var(--dim);line-height:1.25;padding-top:13px;text-align:right;align-self:flex-start
 }
 .blok{
   flex:1;border-radius:12px;padding:12px 14px;display:block;
@@ -392,31 +392,34 @@ canvas{display:block;width:100%;height:140px}
 .bmeta{display:block;font-size:13px;color:var(--dim);margin-top:2px}
 .blok .knoppen{margin-top:10px}
 
-/* ---------- maandweergave ---------- */
-.maand{background:var(--surface);border-radius:var(--r);padding:14px;margin-bottom:16px}
-.dagnamen{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px}
-.dagnamen span{text-align:center;font-size:12px;color:var(--dim-2)}
-.raster{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-.raster .dag{
-  aspect-ratio:1;border:0;background:transparent;border-radius:10px;cursor:pointer;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0
+/* ---------- maand, zoals een echte agenda ---------- */
+.dagnamen{display:grid;grid-template-columns:repeat(7,1fr);margin:6px 0 4px}
+.dagnamen span{text-align:center;font-size:12px;font-weight:600;color:var(--dim-2)}
+.maand{margin-bottom:20px}
+.week{display:grid;grid-template-columns:repeat(7,1fr);border-top:1px solid var(--line-soft)}
+.week:last-child{border-bottom:1px solid var(--line-soft)}
+.dag{
+  border:0;background:transparent;cursor:pointer;padding:9px 0 8px;
+  display:flex;flex-direction:column;align-items:center;gap:5px;min-height:54px
 }
-.raster .dag.leeg{cursor:default}
-.raster .nr{font-size:15px;color:var(--text);font-variant-numeric:tabular-nums}
-.raster .dag.nu .nr{color:var(--accent);font-weight:750}
-.raster .dag.gekozen{background:var(--surface-2)}
-.raster .dag.gekozen .nr{font-weight:750}
+.dag.leeg{cursor:default}
+.dag .nr{
+  width:28px;height:28px;display:grid;place-items:center;
+  font-size:15px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1
+}
+.dag .nr.nu{background:var(--accent);color:var(--accent-ink);font-weight:750}
+.dag.gekozen .nr{box-shadow:inset 0 0 0 2px var(--dim-2)}
+.dag.gekozen .nr.nu{box-shadow:none}
 .stipjes{display:flex;gap:3px;height:5px}
-.stipjes i{width:5px;height:5px;border-radius:1.5px;display:block}
 
 /* ---------- vierkante badges ---------- */
 .vak{
-  width:34px;height:34px;flex:none;border-radius:9px;background:var(--surface-2);color:var(--dim);
+  width:34px;height:34px;flex:none;border-radius:0;background:var(--surface-2);color:var(--dim);
   display:grid;place-items:center;font-size:12.5px;font-weight:700;text-transform:lowercase
 }
 .vak.breed{width:auto;min-width:34px;padding:0 9px;font-size:12px}
-.tag{border-radius:7px;padding:4px 9px;font-size:12.5px;font-weight:650}
-.vakje{width:12px;height:12px;border-radius:3px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.tag{border-radius:0;padding:4px 9px;font-size:12.5px;font-weight:650}
+.vakje{width:12px;height:12px;border-radius:0;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
 .vakje.aan{box-shadow:none}
 .bollen{display:flex;align-items:center;gap:5px;margin-top:6px}
 
