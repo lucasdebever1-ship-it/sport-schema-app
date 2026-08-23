@@ -249,3 +249,51 @@ const EXERCISE_INFO = {
     fout: 'Voorover leunen en met je lichaamsgewicht duwen.'
   }
 };
+
+/* ============ agenda ============ */
+
+/* Je vaste week. Dit staat er bij de eerste keer in, je kunt alles aanpassen. */
+const DEFAULT_ROUTINES = [
+  { id: 'school', title: 'School', kind: 'school', days: [1, 2, 3, 4, 5], start: '08:30', end: '15:30', energie: -1 },
+  { id: 'hockey-di', title: 'Hockeytraining', kind: 'sport', days: [2], start: '19:00', end: '21:00', energie: -2 },
+  { id: 'hockey-do', title: 'Hockeytraining', kind: 'sport', days: [4], start: '19:00', end: '21:00', energie: -2 },
+  { id: 'wedstrijd', title: 'Hockeywedstrijd', kind: 'sport', days: [6], start: '09:00', end: '15:00', energie: -2 },
+  { id: 'werk', title: 'Werk', kind: 'werk', days: [0], start: '09:00', end: '17:00', energie: -1 }
+];
+
+/* Waar je aan werkt naast school en sport. Ook dit is later aan te passen. */
+const DEFAULT_GOALS = [
+  { id: 'slot', title: 'Slot game', kind: 'maken', perWeek: 3, minutes: 30, deadline: '', actief: true },
+  { id: 'clokkie', title: 'Clokkie', kind: 'maken', perWeek: 3, minutes: 30, deadline: '', actief: true },
+  { id: 'koken', title: 'Leren koken', kind: 'leren', perWeek: 1, minutes: 45, deadline: '', actief: true },
+  { id: 'pws', title: 'Profielwerkstuk', kind: 'school', perWeek: 1, minutes: 60, deadline: '', actief: true }
+];
+
+const KIND_LABEL = {
+  school: 'school', sport: 'sport', werk: 'werk', maken: 'maken',
+  leren: 'leren', sociaal: 'sociaal', afspraak: 'afspraak', anders: 'anders'
+};
+
+const EVENT_KINDS = [
+  { id: 'afspraak', label: 'Afspraak (tandarts, ortho)' },
+  { id: 'sociaal', label: 'Sociaal (feestje, vrienden)' },
+  { id: 'school', label: 'School (toets, opdracht)' },
+  { id: 'werk', label: 'Werk' },
+  { id: 'sport', label: 'Sport' },
+  { id: 'anders', label: 'Anders' }
+];
+
+/* De dag loopt van wakker worden tot slapen. Daarbinnen zoekt de app gaten. */
+const DAG_START = '07:00';
+const DAG_EIND = '22:30';
+
+/* Vragen die de app stelt om je doelen scherper te krijgen. Eén per keer. */
+const VRAGEN = [
+  { id: 'stap', tekst: 'Wat is de eerstvolgende kleine stap voor {doel}?', bijKind: null },
+  { id: 'maand', tekst: 'Waar wil je met {doel} over een maand staan?', bijKind: null },
+  { id: 'blok', tekst: 'Hoeveel avonden per week past {doel} echt in je week?', bijKind: null },
+  { id: 'rem', tekst: 'Wat hield je deze week tegen bij {doel}?', bijKind: null },
+  { id: 'onderwerp', tekst: 'Heb je al een onderwerp voor {doel}, en wat trekt je daarin?', bijKind: 'school' },
+  { id: 'gerecht', tekst: 'Welk gerecht wil je bij {doel} als eerste onder de knie hebben?', bijKind: 'leren' },
+  { id: 'af', tekst: 'Wanneer is {doel} wat jou betreft af?', bijKind: 'maken' }
+];
