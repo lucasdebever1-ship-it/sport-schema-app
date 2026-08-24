@@ -1,7 +1,7 @@
 /* app.js - de hele app: startscherm, kalender, training, mobiliteit, voortgang, instellingen. */
 
 const STORE_KEY = 'schema-app-v1';
-const VERSIE = '7';
+const VERSIE = '8';
 const DAY_MS = 86400000;
 
 let state = load();
@@ -25,11 +25,12 @@ function defaultState() {
     events: [],       // losse afspraken
     goals: DEFAULT_GOALS.map(g => Object.assign({ log: [] }, g)),
     offdays: {},      // dagen waarop iets vervalt
-    notes: {},        // losse dingen die je doorgeeft
+    notes: {},        // oude losse notities
+    todos: [],        // dingen die je nog moet doen
     profile: { naam: '', geboortejaar: '', lengte: '' },
     weights: [],      // [{ date, kg }]
     flags: {},
-    settings: { rest1: 180, rest2: 90, sound: true }
+    settings: { rest1: 180, rest2: 90, sound: true, buffer: 40 }
   };
 }
 
@@ -312,7 +313,8 @@ function gapsOn(d, minLengte) {
 
   blokken.forEach(b => {
     if (b.van > cursor) gaten.push({ van: cursor, tot: Math.min(b.van, eind) });
-    cursor = Math.max(cursor, b.tot);
+    /* Na school of werk moet je nog naar huis en wat eten. */
+    cursor = Math.max(cursor, b.tot + bufferNa(b));
   });
   if (cursor < eind) gaten.push({ van: cursor, tot: eind });
 
@@ -326,6 +328,13 @@ function gapsOn(d, minLengte) {
       vroeg: eersteVast !== undefined && g.tot <= eersteVast
     }))
     .filter(g => g.lengte >= (minLengte || 20));
+}
+
+/* Hoeveel lucht je na een blok nodig hebt voor je weer iets doet. */
+function bufferNa(blok) {
+  if (blok.kind === 'school' || blok.kind === 'werk') return Number(state.settings.buffer) || 0;
+  if (blok.energie <= -2) return 30;
+  return 10;
 }
 
 /* Zit er vlak voor dit gat iets waar je moe van wordt? */
@@ -630,12 +639,9 @@ function verwerkZin(tekst) {
     return { tekst: e.title + ' staat in je agenda op ' + formatDate(dag) + ', ' + e.start + ' tot ' + e.end + '.', herstel: { soort: 'event', id: e.id }, botsing: e };
   }
 
-  /* de rest bewaren we als notitie bij de dag */
-  const dag = datum || todayKey();
-  state.notes = state.notes || {};
-  state.notes[dag] = (state.notes[dag] || []).concat([tekst.trim()]);
-  save();
-  return { tekst: 'Genoteerd bij ' + formatDate(dag) + '. Zet er een tijd bij als het ook in je dag moet staan.' };
+  /* de rest wordt een taak, dan raak je het niet kwijt */
+  const taak = taakErbij(tekst, '');
+  return { tekst: '"' + taak.tekst + '" staat bij je taken.', taak: taak.id };
 }
 
 function netteTitel(tekst) {
@@ -695,6 +701,51 @@ function vindTijden(t) {
 
 function uur(u, m) {
   return String(Math.min(23, Number(u))).padStart(2, '0') + ':' + String(m ? Number(m) : 0).padStart(2, '0');
+}
+
+/* ================= dingen die nog moeten ================= */
+
+function openTaken() {
+  return (state.todos || []).filter(t => !t.klaar);
+}
+
+function taakErbij(tekst, notitie) {
+  state.todos = state.todos || [];
+  const t = { id: 't' + Date.now(), tekst: tekst.trim(), notitie: notitie || '', klaar: false, gemaakt: todayKey() };
+  state.todos.push(t);
+  save();
+  return t;
+}
+
+function taakAf(id) {
+  const t = (state.todos || []).find(x => x.id === id);
+  if (!t) return;
+  t.klaar = !t.klaar;
+  t.afDatum = t.klaar ? todayKey() : '';
+  save();
+  render();
+  if (t.klaar) toast('Afgevinkt');
+}
+
+function taakDetail(id) {
+  const t = (state.todos || []).find(x => x.id === id);
+  if (!t) return;
+  showModal('<h2>' + esc(t.tekst) + '</h2>' +
+    '<div class="veld"><label for="t-notitie">Opmerking erbij</label>' +
+    '<input id="t-notitie" type="text" placeholder="spalkje los, vraag naar de rekening" value="' + esc(t.notitie || '') + '"></div>' +
+    '<button class="btn accent" data-taaknotitie="' + t.id + '">Opslaan</button>' +
+    '<button class="btn ghost slim" data-taakaf="' + t.id + '">' + (t.klaar ? 'Toch niet gedaan' : 'Afvinken') + '</button>' +
+    '<button class="btn ghost danger slim" data-taakweg="' + t.id + '">Weghalen</button>');
+}
+
+function nieuweTaak() {
+  showModal('<h2>Wat moet er nog gebeuren?</h2>' +
+    '<div class="veld"><label for="t-tekst">Wat</label>' +
+    '<input id="t-tekst" type="text" placeholder="ortho bellen, deo halen bij Kruidvat"></div>' +
+    '<div class="veld"><label for="t-note">Opmerking, mag leeg</label>' +
+    '<input id="t-note" type="text" placeholder="spalkje los"></div>' +
+    '<button class="btn accent" data-taakopslaan="1">Zet erbij</button>' +
+    '<button class="btn ghost slim" data-close="1">Annuleren</button>');
 }
 
 /* ================= ik heb nu tijd ================= */
@@ -897,6 +948,8 @@ function screenVandaag() {
     h += '<div class="nudge">' + esc(t) + '</div>';
   });
 
+  h += takenBlok();
+
   h += '<div class="section"><h2>Je dag</h2><span class="small dim">' + dagSamenvatting(d) + '</span></div>';
   h += dagBlokkenHtml(d);
 
@@ -906,6 +959,37 @@ function screenVandaag() {
     { v: weekStats().count, k: 'trainingen' },
     { v: gew ? fmtKg(gew.kg) : '&mdash;', k: 'kilo' }
   ]);
+  return h;
+}
+
+/* Alles wat nog moet: losse taken en wat er van je doelen open staat. */
+function takenBlok() {
+  const taken = openTaken();
+  const doelen = state.goals.filter(g => g.actief && doneThisWeek(g).length < (g.perWeek || 1));
+
+  let h = '<div class="section"><h2>Nog doen</h2>' +
+    '<button class="link" data-nieuwetaak="1">erbij</button></div>';
+
+  if (!taken.length && !doelen.length) {
+    return h + '<div class="card"><p class="dim small">Niks meer open. Lekker.</p></div>';
+  }
+
+  h += '<div class="card tight"><ul class="rows">';
+  taken.slice(0, 8).forEach(t => {
+    h += '<li><span class="hokje" data-taakaf="' + t.id + '"></span>' +
+      '<span class="main" data-taakdetail="' + t.id + '"><span class="name">' + esc(t.tekst) + '</span>' +
+      (t.notitie ? '<br><span class="meta">' + esc(t.notitie) + '</span>' : '') + '</span>' +
+      '<span class="right" data-taakdetail="' + t.id + '">' + (t.notitie ? 'wijzig' : 'opmerking') + '</span></li>';
+  });
+  doelen.forEach(g => {
+    const rest = (g.perWeek || 1) - doneThisWeek(g).length;
+    h += '<li><span class="vak" style="background:' + zacht(kleurVoor(g.kind), 0.2) + ';color:' + kleurVoor(g.kind) + '">' +
+      esc(g.title.charAt(0).toUpperCase()) + '</span>' +
+      '<span class="main"><span class="name">' + esc(g.title) + '</span><br>' +
+      '<span class="meta">nog ' + plural(rest, 'keer', 'keer') + ' deze week</span></span>' +
+      '<button class="mini-btn" data-logdoel="' + g.id + '|' + (g.minutes || 30) + '">gedaan</button></li>';
+  });
+  h += '</ul></div>';
   return h;
 }
 
@@ -1969,6 +2053,10 @@ function screenProfiel() {
   h += '<div class="card"><div class="cardhead"><h3>Instellingen</h3></div>' +
     '<div class="veld"><label for="r1">Rust bij de eerste twee oefeningen</label>' + restSelect('r1', 'rest1', s.rest1) + '</div>' +
     '<div class="veld"><label for="r2">Rust bij de rest</label>' + restSelect('r2', 'rest2', s.rest2) + '</div>' +
+    '<div class="veld"><label for="buf">Tijd na school of werk voor je iets doet</label>' +
+    '<select id="buf" data-setting="buffer">' + [0, 20, 30, 40, 50, 60, 90].map(o =>
+      '<option value="' + o + '"' + (Number(s.buffer) === o ? ' selected' : '') + '>' + (o ? o + ' minuten' : 'geen tijd nodig') + '</option>').join('') +
+    '</select></div>' +
     '<div class="check' + (s.sound ? ' on' : '') + '" data-sound="1" style="margin-top:14px">' +
     '<span class="box">' + ICON.check + '</span><span class="main"><span class="name">Piepje als de rust voorbij is</span></span></div></div>';
 
@@ -2261,6 +2349,28 @@ document.addEventListener('click', e => {
   if ((n = hit('zeg'))) return zegIets();
   if ((n = hit('bewerkprofiel'))) return formProfiel();
   if ((n = hit('uitleg'))) return toonUitleg();
+  if ((n = hit('nieuwetaak'))) return nieuweTaak();
+  if ((n = hit('taakdetail'))) return taakDetail(n.dataset.taakdetail);
+  if ((n = hit('taakaf'))) { closeModal(); return taakAf(n.dataset.taakaf); }
+  if ((n = hit('taakopslaan'))) {
+    const tekst = el('t-tekst').value.trim();
+    if (!tekst) return alert('Typ even waar het om gaat.');
+    taakErbij(tekst, el('t-note').value.trim());
+    closeModal();
+    render();
+    return toast('Staat erbij');
+  }
+  if ((n = hit('taaknotitie'))) {
+    const t = (state.todos || []).find(x => x.id === n.dataset.taaknotitie);
+    if (t) { t.notitie = el('t-notitie').value.trim(); save(); }
+    closeModal();
+    render();
+    return toast('Opgeslagen');
+  }
+  if ((n = hit('taakweg'))) {
+    state.todos = (state.todos || []).filter(x => x.id !== n.dataset.taakweg);
+    save(); closeModal(); return render();
+  }
   if ((n = hit('vraagtijd'))) return vraagTijd();
   if ((n = hit('nutijd'))) return nuTijd(Number(n.dataset.nutijd));
   if ((n = hit('zetprio'))) {
@@ -2391,6 +2501,16 @@ if (!state.flags.werkWeg) {
     state.routines = state.routines.filter(r => r.id !== 'werk');
   }
   state.flags.werkWeg = true;
+  save();
+}
+
+/* Wat je vroeger als losse notitie doorgaf, wordt nu een taak. */
+if (!state.flags.notitiesOmgezet) {
+  Object.keys(state.notes || {}).forEach(dag => {
+    (state.notes[dag] || []).forEach(tekst => taakErbij(tekst, ''));
+  });
+  state.notes = {};
+  state.flags.notitiesOmgezet = true;
   save();
 }
 save();

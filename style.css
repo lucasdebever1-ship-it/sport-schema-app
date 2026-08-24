@@ -430,3 +430,16 @@ canvas{display:block;width:100%;height:140px}
   font-size:18px;font-weight:750;cursor:pointer
 }
 .tijdkeuze button span{display:block;font-size:11px;font-weight:500;color:var(--dim);margin-top:2px}
+
+/* ---------- taken ---------- */
+.hokje{
+  width:26px;height:26px;flex:none;background:var(--surface-2);
+  box-shadow:inset 0 0 0 2px var(--line);cursor:pointer;position:relative
+}
+.hokje::after{
+  content:"";position:absolute;left:8px;top:3px;width:7px;height:13px;
+  border:solid var(--accent-ink);border-width:0 3px 3px 0;transform:rotate(45deg);opacity:0
+}
+.hokje.aan{background:var(--accent);box-shadow:none}
+.hokje.aan::after{opacity:1}
+.rows>li .mini-btn{flex:none}
