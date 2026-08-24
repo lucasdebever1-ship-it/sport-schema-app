@@ -1,6 +1,7 @@
 /* app.js - de hele app: startscherm, kalender, training, mobiliteit, voortgang, instellingen. */
 
 const STORE_KEY = 'schema-app-v1';
+const VERSIE = '7';
 const DAY_MS = 86400000;
 
 let state = load();
@@ -413,9 +414,11 @@ function candidates(d) {
 
   const zwaarVandaag = blocksOn(d).some(b => b.energie <= -2) || !!sessionOn(k);
   if (zwaarVandaag && !state.mobility.some(m => m.date === k)) {
+    const routine = MOBILITY[sessionOn(k) && String(sessionOn(k).workoutId).indexOf('benen') !== -1 ? 0 : 1];
     lijst.push({
-      soort: 'mobiliteit', id: 'heupen-benen', titel: 'Mobiliteit',
-      minuten: 15, score: 3, reden: 'je hebt vandaag gesport', zwaar: false
+      soort: 'mobiliteit', id: routine.id, titel: 'Mobiliteit: ' + routine.title.toLowerCase(),
+      minuten: 15, score: 3, zwaar: false,
+      reden: routine.exercises.slice(0, 3).join(', ').toLowerCase() + ' en meer, ' + routine.seconds + 's per kant'
     });
   }
 
@@ -433,8 +436,9 @@ function planDay(d) {
   let losMinuten = 0;
   let los = 0;
 
-  alles.filter(c => c.soort === 'gym').forEach(c => plaats(c, true));
-  alles.filter(c => c.soort !== 'gym').forEach(c => {
+  /* Gym en mobiliteit horen bij je week, die plaats ik eerst. */
+  alles.filter(c => c.soort === 'gym' || c.soort === 'mobiliteit').forEach(c => plaats(c, c.soort === 'gym'));
+  alles.filter(c => c.soort !== 'gym' && c.soort !== 'mobiliteit').forEach(c => {
     if (los >= maxLos || losMinuten >= 150) return;
     if (plaats(c, false)) { los++; losMinuten += c.minuten; }
   });
@@ -465,10 +469,22 @@ function dagLijn(d) {
   const rijen = blocksOn(d).map(b => ({
     van: b.van, tot: b.tot, titel: b.titel, kind: b.kind, vast: true, id: b.id, evId: b.evId, note: b.note
   }));
-  planDay(d).forEach(p => rijen.push({
+  const plan = planDay(d);
+  plan.forEach(p => rijen.push({
     van: p.van, tot: p.tot, titel: p.titel, kind: p.soort, vast: false,
     id: p.id, reden: p.reden, minuten: p.minuten
   }));
+
+  /* Gym en mobiliteit horen altijd zichtbaar te zijn, ook als je dag vol zit. */
+  candidates(d).filter(c => c.soort === 'gym' || c.soort === 'mobiliteit').forEach(c => {
+    if (plan.some(p => p.soort === c.soort)) return;
+    rijen.push({
+      van: toMin(DAG_EIND), tot: toMin(DAG_EIND), titel: c.titel, kind: c.soort, vast: false,
+      id: c.id, minuten: c.minuten, geenTijd: true,
+      reden: c.soort === 'gym' ? 'past er vandaag niet meer bij, kort houden of morgen doen' : c.reden
+    });
+  });
+
   return rijen.sort((a, b) => a.van - b.van);
 }
 
@@ -844,7 +860,7 @@ function blokRij(r, compact) {
     knoppen += '<button class="mini-btn stil" data-skipdoel="' + r.id + '">niet nu</button>';
   }
   return '<li class="dagrij">' +
-    '<span class="uur">' + toTijd(r.van) + '<br><span class="dim tiny">' + toTijd(r.tot) + '</span></span>' +
+    '<span class="uur">' + (r.geenTijd ? '<span class="dim">los</span>' : toTijd(r.van) + '<br><span class="dim tiny">' + toTijd(r.tot) + '</span>') + '</span>' +
     '<span class="blok' + (r.vast ? '' : ' voorstel') + '" style="' + stijl + '"' + (r.evId ? ' data-afspraak="' + r.evId + '"' : '') + '>' +
     '<span class="btitel" style="color:' + hex + '">' + esc(r.titel) + '</span>' +
     (r.reden ? '<span class="bmeta">' + esc(r.reden) + '</span>' : '') +
@@ -1917,44 +1933,22 @@ function screenProfiel() {
   const versch = gewichtsVerschil();
   const lijst = state.weights.slice().sort((a, b) => a.date < b.date ? -1 : 1);
 
-  let h = topbar('Profiel', 'alles over jou op een rij');
+  let h = topbar('Profiel', 'jij en je instellingen');
 
-  /* wie je bent */
-  h += '<div class="card"><div class="cardhead"><h3>Jij</h3>' +
-    '<button class="link" data-bewerkprofiel="1">wijzig</button></div>' +
-    '<ul class="rows">' +
-    rijtje('Naam', esc(p.naam || 'nog niet ingevuld')) +
-    rijtje('Leeftijd', leeftijd() ? leeftijd() + ' jaar' : '&mdash;') +
-    rijtje('Lengte', p.lengte ? p.lengte + ' cm' : '&mdash;') +
-    rijtje('Gewicht', gew ? fmtKg(gew.kg) + ' kg' : '&mdash;') +
-    '</ul></div>';
+  /* wie je bent, meteen aan te passen */
+  h += '<div class="card"><div class="cardhead"><h3>Jij</h3></div>' +
+    '<div class="veld"><label for="p-naam">Naam</label>' +
+    '<input id="p-naam" type="text" placeholder="je voornaam" value="' + esc(p.naam) + '" data-profiel="naam"></div>' +
+    '<div class="tweekolom">' +
+    '<div class="veld"><label for="p-jaar">Geboortejaar</label>' +
+    '<input id="p-jaar" type="number" inputmode="numeric" placeholder="2008" value="' + esc(p.geboortejaar) + '" data-profiel="geboortejaar"></div>' +
+    '<div class="veld"><label for="p-lengte">Lengte in cm</label>' +
+    '<input id="p-lengte" type="number" inputmode="numeric" placeholder="182" value="' + esc(p.lengte) + '" data-profiel="lengte"></div>' +
+    '</div><p class="tiny dim mt">Wordt opgeslagen terwijl je typt.</p></div>';
 
-  /* je week in het kort */
-  const uren = state.routines.reduce((n, r) => n + r.days.length * (toMin(r.end) - toMin(r.start)) / 60, 0);
-  h += '<div class="card"><div class="cardhead"><h3>Je week</h3>' +
-    '<button class="link" data-tab="agenda">wijzig</button></div>' +
-    '<ul class="rows">' + state.routines.map(r =>
-      '<li><span class="vak breed" style="background:' + zacht(kleurVoor(r.kind), 0.2) + ';color:' + kleurVoor(r.kind) + '">' +
-      esc(dagenLabel(r.days)) + '</span>' +
-      '<span class="main"><span class="name">' + esc(r.title) + '</span></span>' +
-      '<span class="right">' + r.start + ' - ' + r.end + '</span></li>').join('') +
-    '</ul><p class="tiny dim mt">Samen ' + Math.round(uren) + ' uur per week vast.</p></div>';
-
-  /* waar je aan werkt */
-  const actief = state.goals.filter(g => g.actief).sort((a, b) => goalScore(b) - goalScore(a));
-  h += '<div class="card"><div class="cardhead"><h3>Waar je aan werkt</h3>' +
-    '<button class="link" data-tab="doelen">alles</button></div>' +
-    '<ul class="rows">' + actief.slice(0, 5).map(g =>
-      '<li data-doeldetail="' + g.id + '"><span class="vak" style="background:' + zacht(kleurVoor(g.kind), 0.2) + ';color:' + kleurVoor(g.kind) + '">' +
-      (g.prio === 'hoog' ? '!' : g.title.charAt(0).toUpperCase()) + '</span>' +
-      '<span class="main"><span class="name">' + esc(g.title) + '</span><br>' +
-      '<span class="meta">' + g.perWeek + ' keer per week, ' + g.minutes + ' min</span></span>' +
-      '<span class="right">' + doneThisWeek(g).length + '/' + g.perWeek + '</span></li>').join('') +
-    '</ul></div>';
-
-  /* gym en lichaam */
-  h += '<div class="card"><div class="cardhead"><h3>Gym en lichaam</h3>' +
-    '<button class="link" data-naar="gym">open</button></div>';
+  /* gewicht */
+  h += '<div class="card"><div class="cardhead"><h3>Gewicht</h3>' +
+    (gew ? '<span class="small dim">' + esc(formatDate(gew.date)) + '</span>' : '') + '</div>';
   if (gew) {
     h += '<div class="bigrow"><div><div class="big">' + fmtKg(gew.kg) + '<span class="unitbig">kg</span></div>' +
       '<div class="dim small">' + (versch
@@ -1965,31 +1959,10 @@ function screenProfiel() {
       h += '<canvas data-chart="c-gew"></canvas>';
     }
   } else {
-    h += '<p class="dim small">Weeg jezelf een keer per week op hetzelfde moment. Een halve kilo per maand erbij is genoeg om spieren te bouwen.</p>';
+    h += '<p class="dim small">Weeg jezelf een keer per week, op hetzelfde moment.</p>';
   }
   h += '<div class="invoerrij"><input type="number" inputmode="decimal" step="0.1" placeholder="kg vandaag" id="w-kg">' +
-    '<button class="btn accent" data-addweight="1">' + ICON.plus + '</button></div>';
-  h += '<ul class="rows mt">' +
-    rijtje('Trainingen deze week', weekStats().count) +
-    rijtje('Weken op rij', streakWeeks()) +
-    rijtje('Fase', currentPhase() === 'kracht' ? 'kracht' : 'triathlon week ' + triathlonWeek()) +
-    '</ul></div>';
-
-  /* doel op de lange baan */
-  h += '<div class="card"><div class="cardhead"><h3>Wedstrijd of race</h3></div>';
-  if (state.goal) {
-    const w = weeksToGo();
-    h += '<p>' + esc(goalLabel(state.goal.type)) + ' op ' + esc(formatLong(state.goal.date)) + '.</p>' +
-      '<p class="dim small">Nog ' + plural(w, 'week', 'weken') + '.</p>' +
-      '<button class="btn ghost danger slim" data-goal="remove">Weghalen</button>';
-  } else {
-    h += '<p class="dim small">Vul een datum in als je ergens naartoe traint, dan schakelt het schema tien weken van tevoren om.</p>' +
-      '<div class="veld"><label for="goal-type">Wat</label><select id="goal-type">' +
-      GOAL_TYPES.map(g => '<option value="' + g.id + '">' + esc(g.label) + '</option>').join('') + '</select></div>' +
-      '<div class="veld"><label for="goal-date">Wanneer</label><input type="date" id="goal-date"></div>' +
-      '<button class="btn accent slim" data-goal="add">Opslaan</button>';
-  }
-  h += '</div>';
+    '<button class="btn accent" data-addweight="1">' + ICON.plus + '</button></div></div>';
 
   /* instellingen */
   const s = state.settings;
@@ -2004,9 +1977,27 @@ function screenProfiel() {
     '<p class="dim small">Alles staat op dit apparaat. Maak af en toe een back-up.</p>' +
     '<button class="btn slim" data-backup="1">Back-up kopieren</button>' +
     '<button class="btn slim" data-import="1">Back-up terugzetten</button>' +
-    '<button class="btn slim" data-export="1">Samenvatting voor Claude</button>' +
     '<button class="btn ghost danger slim" data-wipe="1">Alles wissen</button></div>';
+
+  h += '<div class="card tight"><ul class="rows">' +
+    '<li data-uitleg="1"><span class="main"><span class="name">Hoe ik je dag plan</span></span><span class="right">lezen</span></li>' +
+    '<li data-naar="gym"><span class="main"><span class="name">Gym en schema</span></span><span class="right">open</span></li>' +
+    '</ul></div>';
+
+  h += '<p class="tiny dim" style="text-align:center;margin:18px 0">versie ' + VERSIE + '</p>';
   return h;
+}
+
+/* Kort en eerlijk uitleggen wat de app doet met je dag. */
+function toonUitleg() {
+  showModal('<h2>Hoe ik je dag plan</h2>' +
+    '<div class="info-line"><b>Eerst je vaste dingen</b>School, hockey en wat je zelf in je vaste week zet, plus je afspraken. Daar komt niks overheen.</div>' +
+    '<div class="info-line"><b>Dan de gaten</b>Alles tussen 07:00 en 22:30 dat overblijft. Het gat voor school sla ik over, daar ga je toch niks doen.</div>' +
+    '<div class="info-line"><b>Gym gaat voor</b>Staat er gym in je schema, dan krijgt die het laatste grote gat van je dag. Niet vlak na hockey.</div>' +
+    '<div class="info-line"><b>Daarna je doelen</b>Op volgorde van hoeveel je nog te gaan hebt deze week, hoe lang iets stilligt, hoe dichtbij je deadline is en welke prioriteit je gaf. Hoog telt zwaarder, laag lichter.</div>' +
+    '<div class="info-line"><b>En je energie</b>Op een dag met hockey of een wedstrijd zet ik er hoogstens twee dingen bij in plaats van drie, en nooit iets zwaars in het uur na het sporten.</div>' +
+    '<div class="info-line"><b>Na de gym</b>Dan komt er mobiliteit bij, met de oefeningen die bij je training passen.</div>' +
+    '<button class="btn accent" data-close="1">Duidelijk</button>');
 }
 
 function formProfiel() {
@@ -2269,6 +2260,7 @@ document.addEventListener('click', e => {
   /* iets vertellen en tijd hebben */
   if ((n = hit('zeg'))) return zegIets();
   if ((n = hit('bewerkprofiel'))) return formProfiel();
+  if ((n = hit('uitleg'))) return toonUitleg();
   if ((n = hit('vraagtijd'))) return vraagTijd();
   if ((n = hit('nutijd'))) return nuTijd(Number(n.dataset.nutijd));
   if ((n = hit('zetprio'))) {
